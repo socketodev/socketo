@@ -16,7 +16,7 @@ All server code lives in [`apps/server/`](./apps/server/).
 
 ## Deploy
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/socketodev/socketo/apps/server)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/socketodev/socketo/tree/main/apps/server)
 
 Click the button above to deploy to Cloudflare Workers. After deployment, create an app record manually:
 
