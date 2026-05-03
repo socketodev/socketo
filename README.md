@@ -32,7 +32,7 @@ Fill in the row with your own key/secret pair:
 | `key` | Your app key |
 | `secret` | Your app secret |
 | `max_connections` | Recommended `10000` (or `-1` for unlimited) |
-| `enable_client_events` | `true` |
+| `enable_client_events` | `1` (must be integer) |
 
 **NOTE**: A Dashboard could be built in the future to improve this experience and track live statistics!
 
