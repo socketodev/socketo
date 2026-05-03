@@ -21,7 +21,7 @@ Click the button above to deploy to Cloudflare Workers. After deployment, create
 
 1. Go to **Cloudflare Dashboard**
 2. Navigate to **Compute** > **Durable Objects** > `DatabaseDO`
-3. Open **Data Studio** > Enter `default` in the input
+3. Open **Data Studio** > Choose `By Name` method > Enter `default` in the input
 4. Select the `apps` table > **Add Row**
 
 Fill in the row with your own key/secret pair:
