@@ -12,6 +12,7 @@ All server code lives in [`apps/server/`](./apps/server/).
 - [API Endpoints](#api-endpoints)
 - [Usage](#usage)
 - [Development](#development)
+- [Known Limitations](#known-limitations)
 
 ## Deploy
 
@@ -140,3 +141,7 @@ Deploy manually:
 ```bash
 bun run --filter=@apps/server deploy
 ```
+
+## Known Limitations
+
+- **In-memory config caching:** `AppHandler` caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) in memory after the first database read. If you update an app's configuration via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
