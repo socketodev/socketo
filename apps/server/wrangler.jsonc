@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "socketo-server",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-05-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DatabaseDO",
+        "class_name": "DatabaseDO"
+      },
+      {
+        "name": "ServerDO",
+        "class_name": "ServerDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["DatabaseDO", "ServerDO"]
+    }
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
+}
