@@ -1,6 +1,6 @@
 export class ConnectionManager {
   private sockets = new Map<string, WebSocket>()
-  private channels = new Map<string, Set<WebSocket>>()
+  private channels = new Map<string, Set<string>>()
 
   constructor(private ctx: DurableObjectState) {}
 
@@ -22,7 +22,7 @@ export class ConnectionManager {
       this.sockets.set(id, ws)
 
       for (const channel of channels) {
-        this.addToChannel(ws, channel)
+        this.addToChannel(id, channel)
       }
     }
   }
@@ -33,7 +33,9 @@ export class ConnectionManager {
   }
 
   public subscribe(ws: WebSocket, channel: string) {
-    this.addToChannel(ws, channel)
+    const { id } = ws.deserializeAttachment()
+
+    this.addToChannel(id, channel)
 
     const state = ws.deserializeAttachment()
     state.channels.add(channel)
@@ -41,33 +43,39 @@ export class ConnectionManager {
   }
 
   public unsubscribe(ws: WebSocket, channel: string) {
-    const channels = this.channels.get(channel)
+    const { id } = ws.deserializeAttachment()
 
-    if (channels) {
-      channels.delete(ws)
+    const sockets = this.channels.get(channel)
 
-      const state = ws.deserializeAttachment()
-      state.channels.delete(channel)
-      ws.serializeAttachment(state)
+    if (sockets) {
+      sockets.delete(id)
 
-      if (channels.size === 0) {
+      if (sockets.size === 0) {
         this.channels.delete(channel)
       }
     }
+
+    const state = ws.deserializeAttachment()
+    state.channels.delete(channel)
+    ws.serializeAttachment(state)
   }
 
   public unsubscribeAll(ws: WebSocket) {
-    const { channels } = ws.deserializeAttachment()
-    for (const channel of channels) {
-      this.unsubscribe(ws, channel)
-    }
-  }
+    const { id, channels } = ws.deserializeAttachment()
 
-  public isSubscribed(ws: WebSocket, channel: string) {
-    if (!this.channels.has(channel)) {
-      return false
+    for (const channel of channels) {
+      const sockets = this.channels.get(channel)
+      if (sockets) {
+        sockets.delete(id)
+        if (sockets.size === 0) {
+          this.channels.delete(channel)
+        }
+      }
     }
-    return this.channels.get(channel)?.has(ws) ?? false
+
+    const state = ws.deserializeAttachment()
+    state.channels.clear()
+    ws.serializeAttachment(state)
   }
 
   public broadcast(
@@ -76,21 +84,30 @@ export class ConnectionManager {
     data: unknown,
     exceptId?: string,
   ) {
-    const channels = this.channels.get(channel)
+    const sockets = this.channels.get(channel)
 
-    if (channels && channels.size > 0) {
-      for (const ws of channels) {
-        const { id } = ws.deserializeAttachment()
-        if (id !== exceptId) {
-          this.sendTo(ws, { event, channel, data })
-        }
+    if (!sockets || sockets.size === 0) {
+      return
+    }
+
+    const message = JSON.stringify({ event, channel, data })
+
+    for (const id of sockets) {
+      if (id === exceptId) {
+        continue
+      }
+
+      const ws = this.sockets.get(id)
+      if (ws) {
+        this.sendTo(ws, message)
       }
     }
   }
 
-  public sendTo(ws: WebSocket, data: object) {
+  public sendTo(ws: WebSocket, data: object | string) {
     try {
-      ws.send(JSON.stringify(data))
+      const message = typeof data === 'string' ? data : JSON.stringify(data)
+      ws.send(message)
     } catch {
       ws.close()
     }
@@ -104,10 +121,10 @@ export class ConnectionManager {
     return this.channels
   }
 
-  private addToChannel(ws: WebSocket, channel: string) {
+  private addToChannel(id: string, channel: string) {
     if (!this.channels.has(channel)) {
       this.channels.set(channel, new Set())
     }
-    this.channels.get(channel)?.add(ws)
+    this.channels.get(channel)?.add(id)
   }
 }

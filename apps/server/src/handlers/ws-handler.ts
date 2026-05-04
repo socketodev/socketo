@@ -4,10 +4,9 @@ import type { AppHandler } from './app-handler'
 
 export class WebSocketHandler {
   constructor(
-    ctx: DurableObjectState,
+    private ctx: DurableObjectState,
     private connections: ConnectionManager,
     private app: AppHandler,
-    private key: string,
   ) {
     ctx.setWebSocketAutoResponse(
       new WebSocketRequestResponsePair(
@@ -45,7 +44,8 @@ export class WebSocketHandler {
   }
 
   private handleSubscribe(ws: WebSocket, channel: string) {
-    if (this.connections.isSubscribed(ws, channel)) {
+    const { channels } = ws.deserializeAttachment()
+    if (channels.has(channel)) {
       return this.connections.sendTo(ws, {
         event: 'pusher:error',
         channel,
@@ -74,8 +74,8 @@ export class WebSocketHandler {
 
   private async handleClientEvent(ws: WebSocket, message: PusherMessage) {
     const { event, channel, data } = message
-    const config = await this.app.getConfig(this.key)
 
+    const config = await this.app.getConfig(this.ctx.id.name)
     if (!config.enable_client_events) {
       return this.connections.sendTo(ws, {
         event: 'pusher:error',
@@ -87,23 +87,9 @@ export class WebSocketHandler {
       })
     }
 
-    const payload = typeof data === 'string' ? data : JSON.stringify(data)
-    if (payload.length > 262_144) {
-      return this.connections.sendTo(ws, {
-        event: 'pusher:error',
-        channel,
-        data: {
-          code: 4302,
-          message: 'Maximum client event data size exceeded',
-        },
-      })
-    }
-
-    if (channel) {
-      if (this.connections.isSubscribed(ws, channel)) {
-        const { id } = ws.deserializeAttachment()
-        this.connections.broadcast(channel, event, data, id)
-      }
+    const { id, channels } = ws.deserializeAttachment()
+    if (channel && channels.has(channel)) {
+      this.connections.broadcast(channel, event, data, id)
     }
   }
 

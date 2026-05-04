@@ -11,11 +11,10 @@ export class ServerDO extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-    const key = this.ctx.id.name || ''
 
     this.app = new AppHandler(env)
     this.connections = new ConnectionManager(ctx)
-    this.ws = new WebSocketHandler(ctx, this.connections, this.app, key)
+    this.ws = new WebSocketHandler(ctx, this.connections, this.app)
   }
 
   public webSocketMessage(ws: WebSocket, message: string) {
