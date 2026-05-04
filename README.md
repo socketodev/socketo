@@ -34,8 +34,9 @@ Fill in the row with your own key/secret pair:
 | `secret` | Your app secret |
 | `max_connections` | Recommended `10000` (or `-1` for unlimited) |
 | `enable_client_events` | `1` (must be integer) |
+| `location_hint` | Optional (full list: [Supported locations](https://developers.cloudflare.com/durable-objects/reference/data-location/#supported-locations-1)) |
 
-**NOTE**: A Dashboard could be built in the future to improve this experience and track live statistics!
+> **Note:** `location_hint` controls the initial geographic placement of the `ServerDO` Durable Object instance. If omitted, Cloudflare automatically selects the optimal data center based on the origin of the initial `get()` request.
 
 ## Stack
 

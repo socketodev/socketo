@@ -20,7 +20,7 @@ app.use('/:key', upgradeMiddleware, appMiddleware)
 
 app.get('/:key', async (c) => {
   const key = c.req.param('key')
-  const stub = c.env.ServerDO.get(c.env.ServerDO.idFromName(key))
+  const { stub } = c.get('app')
 
   return stub.fetch(c.req.raw, {
     headers: {

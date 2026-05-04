@@ -1,3 +1,4 @@
+import type { DurableObjectLocationHint } from '@cloudflare/workers-types'
 import type { Insertable, Selectable, Updateable } from 'kysely'
 
 export interface Database {
@@ -10,6 +11,7 @@ export interface AppsTable {
   secret: string
   max_connections: number
   enable_client_events: boolean
+  location_hint?: DurableObjectLocationHint
 }
 
 export type App = Selectable<AppsTable>

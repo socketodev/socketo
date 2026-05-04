@@ -7,15 +7,16 @@ export const migrations: Record<string, Migration> = {
     async up(db) {
       await db.schema
         .createTable('apps')
-        .addColumn('id', 'text', (col) => col.unique().primaryKey())
+        .addColumn('id', 'text', (col) => col.primaryKey().unique())
         .addColumn('key', 'text', (col) => col.unique().notNull())
         .addColumn('secret', 'text', (col) => col.notNull())
         .addColumn('max_connections', 'integer', (col) =>
-          col.notNull().defaultTo(10_000),
+          col.notNull().defaultTo(10000),
         )
         .addColumn('enable_client_events', 'boolean', (col) =>
-          col.notNull().defaultTo(true),
+          col.notNull().defaultTo(1),
         )
+        .addColumn('location_hint', 'text')
         .execute()
     },
     async down(db) {
