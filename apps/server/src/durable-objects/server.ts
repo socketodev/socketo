@@ -3,6 +3,7 @@ import type { BatchEvent, Event } from '@/api/schemas/apps'
 import { AppHandler } from '@/handlers/app-handler'
 import { WebSocketHandler } from '@/handlers/ws-handler'
 import { ConnectionManager } from '@/managers/connection-manager'
+import { isPresenceChannel } from '@/utils/auth'
 
 export class ServerDO extends DurableObject<Env> {
   private app: AppHandler
@@ -37,7 +38,9 @@ export class ServerDO extends DurableObject<Env> {
         this.connections.broadcast(channel, name, data, socket_id)
       }
     } else {
-      const { name, channels, data, socket_id } = payload
+      const { name, data, socket_id } = payload
+      const channels =
+        payload.channels ?? (payload.channel ? [payload.channel] : [])
       for (const channel of channels) {
         this.connections.broadcast(channel, name, data, socket_id)
       }
@@ -52,6 +55,44 @@ export class ServerDO extends DurableObject<Env> {
     }
 
     return channels
+  }
+
+  public getChannelsWithInfo() {
+    const result = new Map<
+      string,
+      { subscription_count: number; user_count: number }
+    >()
+
+    for (const [channel, sockets] of this.connections.getChannels()) {
+      result.set(channel, {
+        subscription_count: sockets.size,
+        user_count: this.connections.getMemberCount(channel),
+      })
+    }
+
+    return result
+  }
+
+  public getChannel(channelName: string) {
+    const occupancy = this.connections.getChannelOccupancy(channelName)
+
+    if (!occupancy.occupied) {
+      return null
+    }
+
+    return occupancy
+  }
+
+  public getChannelUsers(channelName: string) {
+    if (!isPresenceChannel(channelName)) {
+      return null
+    }
+
+    return this.connections.getPresenceChannelUsers(channelName)
+  }
+
+  public terminateUserConnections(userId: string) {
+    this.connections.terminateUserConnections(userId)
   }
 
   public getSocketCount() {
@@ -80,7 +121,7 @@ export class ServerDO extends DurableObject<Env> {
       event: 'pusher:connection_established',
       data: {
         socket_id: socketId,
-        activity_timeout: 90,
+        activity_timeout: 120,
       },
     })
 

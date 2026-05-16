@@ -19,17 +19,111 @@ app.get('/:key/sockets', async (c) => {
 
 app.get('/:key/channels', async (c) => {
   const { stub } = c.get('app')
+  const filterByPrefix = c.req.query('filter_by_prefix')
+  const info = c.req.query('info')
 
-  const result = await stub.getChannels()
+  const requestedAttrs = info ? info.split(',').map((s) => s.trim()) : []
 
-  const channels = Object.fromEntries(
-    Array.from(result).map(([channel, userCount]) => [
-      channel,
-      { subscription_count: userCount },
-    ]),
-  )
+  const includeUserCount = requestedAttrs.includes('user_count')
+  const includeSubscriptionCount =
+    requestedAttrs.length === 0 || requestedAttrs.includes('subscription_count')
+
+  if (includeUserCount && filterByPrefix !== 'presence-') {
+    return c.json(
+      { error: 'user_count is only available for presence channels' },
+      400,
+    )
+  }
+
+  const channels: Record<string, Record<string, unknown>> = {}
+
+  if (includeUserCount) {
+    const result = await stub.getChannelsWithInfo()
+
+    for (const [channel, counts] of result) {
+      if (filterByPrefix && !channel.startsWith(filterByPrefix)) continue
+
+      const attrs: Record<string, unknown> = {}
+      if (includeSubscriptionCount) {
+        attrs.subscription_count = counts.subscription_count
+      }
+      attrs.user_count = counts.user_count
+
+      channels[channel] = attrs
+    }
+  } else {
+    const result = await stub.getChannels()
+
+    for (const [channel, subscriptionCount] of result) {
+      if (filterByPrefix && !channel.startsWith(filterByPrefix)) continue
+
+      const attrs: Record<string, unknown> = {}
+      if (includeSubscriptionCount) {
+        attrs.subscription_count = subscriptionCount
+      }
+
+      channels[channel] = attrs
+    }
+  }
 
   return c.json({ channels }, 200)
+})
+
+app.get('/:key/channels/:channel_name', async (c) => {
+  const { stub } = c.get('app')
+  const channelName = c.req.param('channel_name')
+  const info = c.req.query('info')
+
+  const channel = await stub.getChannel(channelName)
+
+  if (!channel) {
+    return c.json({ occupied: false }, 200)
+  }
+
+  const requestedAttrs = info ? info.split(',').map((s) => s.trim()) : []
+
+  const response: Record<string, unknown> = { occupied: true }
+
+  if (
+    requestedAttrs.length === 0 ||
+    requestedAttrs.includes('user_count')
+  ) {
+    response.user_count = channel.user_count
+  }
+
+  if (
+    requestedAttrs.length === 0 ||
+    requestedAttrs.includes('subscription_count')
+  ) {
+    response.subscription_count = channel.subscription_count
+  }
+
+  return c.json(response)
+})
+
+app.get('/:key/channels/:channel_name/users', async (c) => {
+  const { stub } = c.get('app')
+  const channelName = c.req.param('channel_name')
+
+  const users = await stub.getChannelUsers(channelName)
+
+  if (users === null) {
+    return c.json(
+      { error: 'users endpoint is only available for presence channels' },
+      400,
+    )
+  }
+
+  return c.json({ users })
+})
+
+app.post('/:key/users/:user_id/terminate_connections', async (c) => {
+  const { stub } = c.get('app')
+  const userId = c.req.param('user_id')
+
+  await stub.terminateUserConnections(userId)
+
+  return c.json({})
 })
 
 app.post(
@@ -66,7 +160,7 @@ app.post(
 
     await stub.broadcast(payload)
 
-    return c.json({}, 200)
+    return c.json({ batch: payload.batch.map(() => ({})) }, 200)
   },
 )
 

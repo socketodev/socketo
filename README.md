@@ -10,6 +10,7 @@ All server code lives in [`apps/server/`](./apps/server/).
 - [Stack](#stack)
 - [Architecture](#architecture)
 - [API Endpoints](#api-endpoints)
+- [Channel Types](#channel-types)
 - [Usage](#usage)
 - [Development](#development)
 - [Known Limitations](#known-limitations)
@@ -61,9 +62,46 @@ Each app is identified by a unique key/secret pair. The server verifies HMAC-sig
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/:key/sockets` | Active socket count |
-| `GET` | `/:key/channels` | Channel subscription counts |
+| `GET` | `/:key/channels` | Channel list with subscription counts. Supports `filter_by_prefix` query param (e.g. `?filter_by_prefix=presence-`) |
+| `GET` | `/:key/channels/:channel_name` | Single channel info (`occupied`, `user_count`, `subscription_count`) |
+| `GET` | `/:key/channels/:channel_name/users` | List of user IDs subscribed to a presence channel |
 | `POST` | `/:key/events` | Trigger a single event |
 | `POST` | `/:key/batch_events` | Trigger multiple events |
+| `POST` | `/:key/users/:user_id/terminate_connections` | Terminate all connections for a specific user |
+
+## Channel Types
+
+| Type | Prefix | Auth Required | Description |
+|---|---|---|---|
+| Public | _(none)_ | No | Anyone can subscribe |
+| Private | `private-` | Yes (HMAC signature) | Server-authorised subscriptions |
+| Presence | `presence-` | Yes (HMAC + signin) | Private channels with user identity and member events |
+
+### Private Channels
+
+Subscribe with an `auth` signature generated server-side using your app secret:
+
+```
+pusher:subscribe → { "channel": "private-orders", "auth": "<APP_KEY>:<signature>" }
+```
+
+### Presence Channels
+
+Requires user signin first, then subscribe with `auth` and `channel_data`:
+
+```js
+// 1. Sign in
+pusher.signin({ auth: "<signature>", user_data: JSON.stringify({ id: "123", user_info: { name: "Alice" } }) })
+
+// 2. Subscribe
+pusher.subscribe("presence-chat")
+```
+
+Member lifecycle events are broadcast automatically:
+
+- `pusher_internal:subscription_succeeded` — presence data (`ids`, `hash`, `count`)
+- `pusher_internal:member_added` — new member joined
+- `pusher_internal:member_removed` — member left
 
 ## Usage
 
@@ -76,7 +114,6 @@ const pusher = new Pusher("APP_KEY", {
   wsHost: "your-worker.workers.dev",
   wssPort: 443,
   forceTLS: true,
-  disableStats: true,
   enabledTransports: ["ws"],
   cluster: "socketo",
 });

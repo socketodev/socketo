@@ -27,17 +27,8 @@ class DoSqliteAdapter extends SqliteAdapter {}
  * Config for the Durable Object SQLite dialect.
  */
 export interface DoSqliteDialectConfig {
-	/**
-	 * A Durable Object `SqlStorage` instance (`ctx.storage.sql`).
-	 */
-	storage: SqlStorage;
-
-	/**
-	 * Called once when the first query is executed.
-	 */
-	onCreateConnection?:
-		| ((connection: DatabaseConnection) => Promise<void>)
-		| undefined;
+  storage: SqlStorage
+  onCreateConnection?: ((connection: DatabaseConnection) => Promise<void>) | undefined
 }
 
 class DoSqliteDriver implements Driver {

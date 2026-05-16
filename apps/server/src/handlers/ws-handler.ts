@@ -1,5 +1,11 @@
 import type { ConnectionManager } from '../managers/connection-manager'
-import type { PusherMessage } from '../types'
+import type { ParsedUserData, PusherMessage, SigninData, SubscribeData, UnsubscribeData } from '../types'
+import {
+  isPresenceChannel,
+  isProtectedChannel,
+  verifyChannelAuth,
+  verifySigninAuth,
+} from '../utils/auth'
 import type { AppHandler } from './app-handler'
 
 export class WebSocketHandler {
@@ -22,12 +28,16 @@ export class WebSocketHandler {
 
   public async handleMessage(ws: WebSocket, message: string) {
     try {
-      const { event, channel, data } = JSON.parse(message) as PusherMessage
+      const parsed = JSON.parse(message) as PusherMessage
+      const { event, channel, data } = parsed
 
-      if (event === 'pusher:subscribe') {
-        this.handleSubscribe(ws, data.channel)
+      if (event === 'pusher:signin') {
+        await this.handleSignin(ws, data as SigninData)
+      } else if (event === 'pusher:subscribe') {
+        await this.handleSubscribe(ws, data as SubscribeData)
       } else if (event === 'pusher:unsubscribe') {
-        this.handleUnsubscribe(ws, data.channel)
+        const channel = (data as UnsubscribeData)?.channel
+        if (channel) await this.handleUnsubscribe(ws, channel)
       } else if (this.isClientEvent(event)) {
         await this.handleClientEvent(ws, { event, channel, data })
       } else {
@@ -39,32 +49,208 @@ export class WebSocketHandler {
   }
 
   public handleClose(ws: WebSocket) {
+    const { channels, user_id } = ws.deserializeAttachment()
+
+    for (const channel of channels) {
+      if (isPresenceChannel(channel) && user_id) {
+        this.connections.broadcast(channel, 'pusher_internal:member_removed', {
+          user_id,
+        })
+      }
+    }
+
     this.connections.unsubscribeAll(ws)
     this.connections.remove(ws)
   }
 
-  private handleSubscribe(ws: WebSocket, channel: string) {
-    const { channels } = ws.deserializeAttachment()
-    if (channels.has(channel)) {
+  private async handleSignin(
+    ws: WebSocket,
+    data: { auth?: string; user_data?: string },
+  ) {
+    if (!data.auth || !data.user_data) {
       return this.connections.sendTo(ws, {
         event: 'pusher:error',
-        channel,
         data: {
-          code: 4100,
-          message: 'Already subscribed to channel',
+          code: 4009,
+          message: 'Invalid signin data: auth and user_data required',
         },
       })
     }
 
-    this.connections.subscribe(ws, channel)
+    const { id: socketId } = ws.deserializeAttachment()
+    const config = await this.app.getConfig(this.ctx.id.name)
+
+    const isValid = verifySigninAuth(
+      socketId,
+      data.user_data,
+      data.auth,
+      config.secret,
+    )
+
+    if (!isValid) {
+      return this.connections.sendTo(ws, {
+        event: 'pusher:error',
+        data: {
+          code: 4009,
+          message: 'Invalid signin signature',
+        },
+      })
+    }
+
+    let userData: ParsedUserData
+    try {
+      userData = JSON.parse(data.user_data)
+    } catch {
+      return this.connections.sendTo(ws, {
+        event: 'pusher:error',
+        data: {
+          code: 4009,
+          message: 'Invalid user_data JSON',
+        },
+      })
+    }
+
+    const state = ws.deserializeAttachment()
+    state.user_id = userData.id
+    state.user_info = userData.user_info
+    ws.serializeAttachment(state)
 
     this.connections.sendTo(ws, {
-      event: 'pusher_internal:subscription_succeeded',
-      data: { channel },
+      event: 'pusher:signin_success',
+      data: { user_data: data.user_data },
     })
   }
 
-  private handleUnsubscribe(ws: WebSocket, channel: string) {
+  private async handleSubscribe(
+    ws: WebSocket,
+    data: { channel: string; auth?: string; channel_data?: string },
+  ) {
+    const { channels } = ws.deserializeAttachment()
+    if (channels.has(data.channel)) {
+      return this.connections.sendTo(ws, {
+        event: 'pusher_internal:subscription_succeeded',
+        channel: data.channel,
+        data: isPresenceChannel(data.channel)
+          ? this.connections.getPresenceData(data.channel)
+          : {},
+      })
+    }
+
+    if (isProtectedChannel(data.channel)) {
+      if (!data.auth) {
+        return this.connections.sendTo(ws, {
+          event: 'pusher:error',
+          channel: data.channel,
+          data: {
+            code: 4009,
+            message: 'Auth string required for protected channel',
+          },
+        })
+      }
+
+      const { id: socketId } = ws.deserializeAttachment()
+      const config = await this.app.getConfig(this.ctx.id.name)
+
+      const isValid = verifyChannelAuth(
+        socketId,
+        data.channel,
+        data.auth,
+        config.secret,
+      )
+
+      if (!isValid) {
+        return this.connections.sendTo(ws, {
+          event: 'pusher:error',
+          channel: data.channel,
+          data: {
+            code: 4009,
+            message: 'Invalid channel auth signature',
+          },
+        })
+      }
+    }
+
+    if (isPresenceChannel(data.channel)) {
+      await this.handlePresenceSubscribe(ws, data)
+    } else {
+      this.connections.subscribe(ws, data.channel)
+
+      this.connections.sendTo(ws, {
+        event: 'pusher_internal:subscription_succeeded',
+        channel: data.channel,
+        data: {},
+      })
+    }
+  }
+
+  private async handlePresenceSubscribe(
+    ws: WebSocket,
+    data: { channel: string; channel_data?: string },
+  ) {
+    const { user_id } = ws.deserializeAttachment()
+    if (!user_id) {
+      return this.connections.sendTo(ws, {
+        event: 'pusher:error',
+        channel: data.channel,
+        data: {
+          code: 4009,
+          message: 'User must be signed in to subscribe to presence channel',
+        },
+      })
+    }
+
+    let channelData: {
+      user_id: string
+      user_info?: Record<string, unknown>
+    } | null = null
+    if (data.channel_data) {
+      try {
+        channelData = JSON.parse(data.channel_data)
+      } catch {
+        return this.connections.sendTo(ws, {
+          event: 'pusher:error',
+          channel: data.channel,
+          data: {
+            code: 4009,
+            message: 'Invalid channel_data JSON',
+          },
+        })
+      }
+    }
+
+    const state = ws.deserializeAttachment()
+    if (channelData?.user_info) {
+      state.user_info = channelData.user_info
+    }
+    ws.serializeAttachment(state)
+
+    const { user_info } = ws.deserializeAttachment()
+    this.connections.subscribe(ws, data.channel, user_id)
+
+    const presenceData = this.connections.getPresenceData(data.channel)
+
+    this.connections.sendTo(ws, {
+      event: 'pusher_internal:subscription_succeeded',
+      channel: data.channel,
+      data: presenceData,
+    })
+
+    this.connections.broadcast(data.channel, 'pusher_internal:member_added', {
+      user_id,
+      user_info: user_info || {},
+    })
+  }
+
+  private async handleUnsubscribe(ws: WebSocket, channel: string) {
+    if (isPresenceChannel(channel)) {
+      const { user_id } = ws.deserializeAttachment()
+      if (user_id) {
+        this.connections.broadcast(channel, 'pusher_internal:member_removed', {
+          user_id,
+        })
+      }
+    }
+
     this.connections.unsubscribe(ws, channel)
   }
 
@@ -89,7 +275,14 @@ export class WebSocketHandler {
 
     const { id, channels } = ws.deserializeAttachment()
     if (channel && channels.has(channel)) {
-      this.connections.broadcast(channel, event, data, id)
+      const broadcastData =
+        typeof data === 'string' ? data : JSON.stringify(data)
+      if (isPresenceChannel(channel)) {
+        const { user_id } = ws.deserializeAttachment()
+        this.connections.broadcast(channel, event, broadcastData, id, user_id)
+      } else {
+        this.connections.broadcast(channel, event, broadcastData, id)
+      }
     }
   }
 

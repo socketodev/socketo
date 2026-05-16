@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import type { ServerDO } from './durable-objects/server'
 
-export interface HonoContext extends Context {
+export type HonoContext = Context & {
   Bindings: Env
   Variables: {
     app: {
@@ -11,23 +11,45 @@ export interface HonoContext extends Context {
   }
 }
 
-export interface MessageData {
-  channel: string
-  channel_data?: string
+export type PusherMessage = {
+  event: string
+  data: unknown
+  channel?: string
+}
+
+export type ParsedUserData = {
+  id: string
+  user_info?: Record<string, unknown>
+}
+
+export type PresenceData = {
+  presence: {
+    ids: string[]
+    hash: Record<string, Record<string, unknown>>
+    count: number
+  }
+}
+
+export type SigninData = {
   auth?: string
   user_data?: string
 }
 
-export interface PusherMessage {
-  event: string
-  data: MessageData
+export type SubscribeData = {
+  channel: string
+  auth?: string
+  channel_data?: string
+}
+
+export type UnsubscribeData = {
   channel?: string
 }
 
-export interface AttachmentData {
+export type AttachmentData = {
   id: string
   channels: Set<string>
-  [key: string]: unknown
+  user_id?: string
+  user_info?: Record<string, unknown>
 }
 
 declare global {
