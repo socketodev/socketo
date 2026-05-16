@@ -1,11 +1,18 @@
 import type { ConnectionManager } from '../managers/connection-manager'
-import type { ParsedUserData, PusherMessage, SigninData, SubscribeData, UnsubscribeData } from '../types'
+import type {
+  ParsedUserData,
+  PusherMessage,
+  SigninData,
+  SubscribeData,
+  UnsubscribeData,
+} from '../types'
 import {
   isPresenceChannel,
   isProtectedChannel,
   verifyChannelAuth,
   verifySigninAuth,
 } from '../utils/auth'
+import { isValidChannelName, isValidEventName } from '../utils/validation'
 import type { AppHandler } from './app-handler'
 
 export class WebSocketHandler {
@@ -85,6 +92,7 @@ export class WebSocketHandler {
       data.user_data,
       data.auth,
       config.secret,
+      config.key,
     )
 
     if (!isValid) {
@@ -125,6 +133,17 @@ export class WebSocketHandler {
     ws: WebSocket,
     data: { channel: string; auth?: string; channel_data?: string },
   ) {
+    if (!isValidChannelName(data.channel)) {
+      return this.connections.sendTo(ws, {
+        event: 'pusher:error',
+        channel: data.channel,
+        data: {
+          code: 4009,
+          message: 'Invalid channel name',
+        },
+      })
+    }
+
     const { channels } = ws.deserializeAttachment()
     if (channels.has(data.channel)) {
       return this.connections.sendTo(ws, {
@@ -261,13 +280,17 @@ export class WebSocketHandler {
   private async handleClientEvent(ws: WebSocket, message: PusherMessage) {
     const { event, channel, data } = message
 
+    if (!isValidEventName(event)) {
+      return
+    }
+
     const config = await this.app.getConfig(this.ctx.id.name)
     if (!config.enable_client_events) {
       return this.connections.sendTo(ws, {
         event: 'pusher:error',
         channel,
         data: {
-          code: 4301,
+          code: 4009,
           message: 'Client events are not enabled',
         },
       })

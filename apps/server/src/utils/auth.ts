@@ -21,12 +21,12 @@ export function verifySigninAuth(
   userData: string,
   authString: string,
   secret: string,
+  appKey: string,
 ): boolean {
-  const marker = '::user::'
-  const markerIndex = authString.indexOf(marker)
-  if (markerIndex === -1) return false
+  const expectedPrefix = `${appKey}::user::`
+  if (!authString.startsWith(expectedPrefix)) return false
 
-  const providedSignature = authString.slice(markerIndex + marker.length)
+  const providedSignature = authString.slice(expectedPrefix.length)
   const stringToSign = `${socketId}::user::${userData}`
   const expectedSignature = computeHmac(stringToSign, secret)
 

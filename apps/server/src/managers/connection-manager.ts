@@ -146,7 +146,7 @@ export class ConnectionManager {
       }
       ws.send(message)
     } catch {
-      ws.close()
+      ws.close(4200, 'Send failed')
     }
   }
 
@@ -223,7 +223,7 @@ export class ConnectionManager {
       const { user_id } = ws.deserializeAttachment()
       if (user_id === userId) {
         this.unsubscribeAll(ws)
-        ws.close()
+        ws.close(4200, 'Terminated by server')
         this.sockets.delete(id)
       }
     }

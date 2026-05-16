@@ -101,18 +101,23 @@ export class ServerDO extends DurableObject<Env> {
 
   public async fetch(request: Request): Promise<Response> {
     const key = request.headers.get('X-APP-KEY') || ''
+    const url = new URL(request.url)
+
+    const protocol = url.searchParams.get('protocol')
+    if (!protocol) {
+      return this.rejectConnection(4008, 'No protocol version supplied')
+    } else if (Number(protocol) !== 7) {
+      return this.rejectConnection(4007, 'Unsupported protocol version')
+    }
 
     try {
       const app = await this.app.getConfig(key)
 
       if (!this.ws.canAcceptNewConnection(app.max_connections)) {
-        console.error('Connection limit exceeded.')
-        return new Response(null, { status: 403 })
+        return this.rejectConnection(4004, 'Connection quota exceeded')
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error(message)
-      return new Response(null, { status: 500 })
+    } catch {
+      return this.rejectConnection(4001, 'App not found')
     }
 
     const { client, server, socketId } = this.connections.upgrade()
@@ -125,6 +130,16 @@ export class ServerDO extends DurableObject<Env> {
       },
     })
 
+    return new Response(null, { status: 101, webSocket: client })
+  }
+
+  private rejectConnection(code: number, message: string): Response {
+    const { client, server } = this.connections.upgrade()
+    this.connections.sendTo(server, {
+      event: 'pusher:error',
+      data: { code, message },
+    })
+    server.close(code, message)
     return new Response(null, { status: 101, webSocket: client })
   }
 }

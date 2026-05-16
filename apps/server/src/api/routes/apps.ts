@@ -28,9 +28,9 @@ app.get('/:key/channels', async (c) => {
   const includeSubscriptionCount =
     requestedAttrs.length === 0 || requestedAttrs.includes('subscription_count')
 
-  if (includeUserCount && filterByPrefix !== 'presence-') {
+  if (includeUserCount && !filterByPrefix?.startsWith('presence-')) {
     return c.json(
-      { error: 'user_count is only available for presence channels' },
+      { error: 'user_count requires filtering by presence- prefix' },
       400,
     )
   }
@@ -82,12 +82,19 @@ app.get('/:key/channels/:channel_name', async (c) => {
 
   const requestedAttrs = info ? info.split(',').map((s) => s.trim()) : []
 
+  if (
+    requestedAttrs.includes('user_count') &&
+    !channelName.startsWith('presence-')
+  ) {
+    return c.json(
+      { error: 'user_count is only available for presence channels' },
+      400,
+    )
+  }
+
   const response: Record<string, unknown> = { occupied: true }
 
-  if (
-    requestedAttrs.length === 0 ||
-    requestedAttrs.includes('user_count')
-  ) {
+  if (requestedAttrs.length === 0 || requestedAttrs.includes('user_count')) {
     response.user_count = channel.user_count
   }
 
