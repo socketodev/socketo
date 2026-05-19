@@ -5,9 +5,10 @@ export function verifyChannelAuth(
   channel: string,
   authString: string,
   secret: string,
+  appKey: string,
 ): boolean {
   const parts = authString.split(':')
-  if (parts.length < 2) return false
+  if (parts.length < 2 || parts[0] !== appKey) return false
 
   const providedSignature = parts.slice(1).join(':')
   const stringToSign = `${socketId}:${channel}`

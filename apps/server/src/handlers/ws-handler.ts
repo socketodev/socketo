@@ -50,8 +50,8 @@ export class WebSocketHandler {
       } else {
         console.log('Message event handler not implemented.', event)
       }
-    } catch {
-      //
+    } catch (e) {
+      console.error('Failed to handle WebSocket message:', e)
     }
   }
 
@@ -105,9 +105,18 @@ export class WebSocketHandler {
       })
     }
 
-    let userData: ParsedUserData
     try {
-      userData = JSON.parse(data.user_data)
+      const userData = JSON.parse(data.user_data) as ParsedUserData
+
+      const state = ws.deserializeAttachment()
+      state.user_id = userData.id
+      state.user_info = userData.user_info
+      ws.serializeAttachment(state)
+
+      this.connections.sendTo(ws, {
+        event: 'pusher:signin_success',
+        data: { user_data: data.user_data },
+      })
     } catch {
       return this.connections.sendTo(ws, {
         event: 'pusher:error',
@@ -117,16 +126,6 @@ export class WebSocketHandler {
         },
       })
     }
-
-    const state = ws.deserializeAttachment()
-    state.user_id = userData.id
-    state.user_info = userData.user_info
-    ws.serializeAttachment(state)
-
-    this.connections.sendTo(ws, {
-      event: 'pusher:signin_success',
-      data: { user_data: data.user_data },
-    })
   }
 
   private async handleSubscribe(
@@ -175,6 +174,7 @@ export class WebSocketHandler {
         data.channel,
         data.auth,
         config.secret,
+        config.key,
       )
 
       if (!isValid) {
@@ -206,7 +206,7 @@ export class WebSocketHandler {
     ws: WebSocket,
     data: { channel: string; channel_data?: string },
   ) {
-    const { user_id } = ws.deserializeAttachment()
+    const { id, user_id } = ws.deserializeAttachment()
     if (!user_id) {
       return this.connections.sendTo(ws, {
         event: 'pusher:error',
@@ -218,55 +218,64 @@ export class WebSocketHandler {
       })
     }
 
-    let channelData: {
-      user_id: string
-      user_info?: Record<string, unknown>
-    } | null = null
-    if (data.channel_data) {
-      try {
-        channelData = JSON.parse(data.channel_data)
-      } catch {
-        return this.connections.sendTo(ws, {
-          event: 'pusher:error',
-          channel: data.channel,
-          data: {
-            code: 4009,
-            message: 'Invalid channel_data JSON',
-          },
-        })
+    try {
+      const channelData = data.channel_data
+        ? (JSON.parse(data.channel_data) as {
+            user_id: string
+            user_info?: Record<string, unknown>
+          })
+        : null
+
+      const state = ws.deserializeAttachment()
+      if (channelData?.user_info) {
+        state.user_info = channelData.user_info
       }
+      ws.serializeAttachment(state)
+
+      const { user_info } = ws.deserializeAttachment()
+      this.connections.subscribe(ws, data.channel, user_id)
+
+      const presenceData = this.connections.getPresenceData(data.channel)
+
+      this.connections.sendTo(ws, {
+        event: 'pusher_internal:subscription_succeeded',
+        channel: data.channel,
+        data: presenceData,
+      })
+
+      this.connections.broadcast(
+        data.channel,
+        'pusher_internal:member_added',
+        {
+          user_id,
+          user_info: user_info || {},
+        },
+        id,
+      )
+    } catch {
+      return this.connections.sendTo(ws, {
+        event: 'pusher:error',
+        channel: data.channel,
+        data: {
+          code: 4009,
+          message: 'Invalid channel_data JSON',
+        },
+      })
     }
-
-    const state = ws.deserializeAttachment()
-    if (channelData?.user_info) {
-      state.user_info = channelData.user_info
-    }
-    ws.serializeAttachment(state)
-
-    const { user_info } = ws.deserializeAttachment()
-    this.connections.subscribe(ws, data.channel, user_id)
-
-    const presenceData = this.connections.getPresenceData(data.channel)
-
-    this.connections.sendTo(ws, {
-      event: 'pusher_internal:subscription_succeeded',
-      channel: data.channel,
-      data: presenceData,
-    })
-
-    this.connections.broadcast(data.channel, 'pusher_internal:member_added', {
-      user_id,
-      user_info: user_info || {},
-    })
   }
 
   private async handleUnsubscribe(ws: WebSocket, channel: string) {
     if (isPresenceChannel(channel)) {
-      const { user_id } = ws.deserializeAttachment()
+      const { id, user_id } = ws.deserializeAttachment()
       if (user_id) {
-        this.connections.broadcast(channel, 'pusher_internal:member_removed', {
-          user_id,
-        })
+        this.connections.broadcast(
+          channel,
+          'pusher_internal:member_removed',
+          {
+            user_id,
+          },
+          id,
+        )
       }
     }
 
@@ -282,6 +291,18 @@ export class WebSocketHandler {
 
     if (!isValidEventName(event)) {
       return
+    }
+
+    if (channel && !isProtectedChannel(channel)) {
+      return this.connections.sendTo(ws, {
+        event: 'pusher:error',
+        channel,
+        data: {
+          code: 4009,
+          message:
+            'Client events are only allowed on private or presence channels',
+        },
+      })
     }
 
     const config = await this.app.getConfig(this.ctx.id.name)

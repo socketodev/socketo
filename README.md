@@ -61,13 +61,14 @@ Each app is identified by a unique key/secret pair. The server verifies HMAC-sig
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/:key/sockets` | Active socket count |
-| `GET` | `/:key/channels` | Channel list with subscription counts. Supports `filter_by_prefix` query param (e.g. `?filter_by_prefix=presence-`) |
-| `GET` | `/:key/channels/:channel_name` | Single channel info (`occupied`, `user_count`, `subscription_count`) |
-| `GET` | `/:key/channels/:channel_name/users` | List of user IDs subscribed to a presence channel |
-| `POST` | `/:key/events` | Trigger a single event |
-| `POST` | `/:key/batch_events` | Trigger multiple events |
-| `POST` | `/:key/users/:user_id/terminate_connections` | Terminate all connections for a specific user |
+| `GET` | `/app/:key` | WebSocket upgrade. Requires `Upgrade: websocket` header and `?protocol=7` query param |
+| `GET` | `/apps/:key/sockets` | Active socket count |
+| `GET` | `/apps/:key/channels` | Channel list with subscription counts. Supports `filter_by_prefix` query param (e.g. `?filter_by_prefix=presence-`) |
+| `GET` | `/apps/:key/channels/:channel_name` | Single channel info (`occupied`, `user_count`, `subscription_count`) |
+| `GET` | `/apps/:key/channels/:channel_name/users` | List of user IDs subscribed to a presence channel |
+| `POST` | `/apps/:key/events` | Trigger a single event |
+| `POST` | `/apps/:key/batch_events` | Trigger multiple events |
+| `POST` | `/apps/:key/users/:user_id/terminate_connections` | Terminate all connections for a specific user |
 
 ## Channel Types
 
@@ -183,3 +184,9 @@ bun run --filter=@apps/server deploy
 ## Known Limitations
 
 - **In-memory config caching:** `AppHandler` caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) in memory after the first database read. If you update an app's configuration via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
+
+- **No event size limit:** Events larger than 10 KB are not rejected. Pusher returns HTTP `413` for oversized events. Large WebSocket messages may hit Cloudflare frame limits.
+
+- **No `auth_timestamp` clock skew check:** The REST API authentication middleware does not validate that the `auth_timestamp` query parameter falls within ±600 seconds of the current time. This means signed requests can be replayed indefinitely.
+
+- **`info` parameter not supported on event triggers:** The `POST /events` and `POST /batch_events` endpoints do not return channel attributes (`user_count`, `subscription_count`) when the `info` query parameter is provided.

@@ -114,12 +114,13 @@ export class ConnectionManager {
         ? JSON.stringify(data)
         : data
 
-    const message = JSON.stringify({
+    const msg: Record<string, unknown> = {
       event,
       channel,
       data: serializedData,
-      user_id: userId,
-    })
+    }
+    if (userId) msg.user_id = userId
+    const message = JSON.stringify(msg)
 
     for (const id of sockets) {
       if (id === exceptId) {
@@ -135,16 +136,7 @@ export class ConnectionManager {
 
   public sendTo(ws: WebSocket, data: object | string) {
     try {
-      let message: string
-      if (typeof data === 'string') {
-        message = data
-      } else {
-        if ('data' in data && typeof data.data !== 'string') {
-          data = { ...data, data: JSON.stringify(data.data) }
-        }
-        message = JSON.stringify(data)
-      }
-      ws.send(message)
+      ws.send(typeof data === 'string' ? data : this.stringify(data))
     } catch {
       ws.close(4200, 'Send failed')
     }
@@ -253,5 +245,12 @@ export class ConnectionManager {
       this.channels.set(channel, new Set())
     }
     this.channels.get(channel)?.add(id)
+  }
+
+  private stringify(data: object): string {
+    if ('data' in data && typeof data.data !== 'string') {
+      data = { ...data, data: JSON.stringify(data.data) }
+    }
+    return JSON.stringify(data)
   }
 }

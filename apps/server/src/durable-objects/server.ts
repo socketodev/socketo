@@ -110,14 +110,13 @@ export class ServerDO extends DurableObject<Env> {
       return this.rejectConnection(4007, 'Unsupported protocol version')
     }
 
-    try {
-      const app = await this.app.getConfig(key)
-
-      if (!this.ws.canAcceptNewConnection(app.max_connections)) {
-        return this.rejectConnection(4004, 'Connection quota exceeded')
-      }
-    } catch {
+    const app = await this.app.getConfig(key).catch(() => null)
+    if (!app) {
       return this.rejectConnection(4001, 'App not found')
+    }
+
+    if (!this.ws.canAcceptNewConnection(app.max_connections)) {
+      return this.rejectConnection(4004, 'Connection quota exceeded')
     }
 
     const { client, server, socketId } = this.connections.upgrade()
