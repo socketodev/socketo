@@ -148,6 +148,29 @@ app.post(
 
     await stub.broadcast(payload)
 
+    if (payload.info) {
+      const requested = payload.info.split(',').map((s) => s.trim())
+      const includeUserCount = requested.includes('user_count')
+      const includeSubscriptionCount = requested.includes('subscription_count')
+
+      const channels =
+        payload.channels ?? (payload.channel ? [payload.channel] : [])
+      const result: Record<string, Record<string, number>> = {}
+
+      for (const channel of channels) {
+        const occ = await stub.getChannel(channel)
+        const attrs: Record<string, number> = {}
+        if (occ) {
+          if (includeUserCount) attrs.user_count = occ.user_count
+          if (includeSubscriptionCount)
+            attrs.subscription_count = occ.subscription_count
+        }
+        result[channel] = attrs
+      }
+
+      return c.json({ channels: result }, 200)
+    }
+
     return c.json({}, 200)
   },
 )
@@ -167,7 +190,27 @@ app.post(
 
     await stub.broadcast(payload)
 
-    return c.json({ batch: payload.batch.map(() => ({})) }, 200)
+    const batchResponses = await Promise.all(
+      payload.batch.map(async (item) => {
+        if (!item.info) return {}
+
+        const requested = item.info.split(',').map((s) => s.trim())
+        const includeUserCount = requested.includes('user_count')
+        const includeSubscriptionCount =
+          requested.includes('subscription_count')
+
+        const occ = await stub.getChannel(item.channel)
+        const attrs: Record<string, number> = {}
+        if (occ) {
+          if (includeUserCount) attrs.user_count = occ.user_count
+          if (includeSubscriptionCount)
+            attrs.subscription_count = occ.subscription_count
+        }
+        return attrs
+      }),
+    )
+
+    return c.json({ batch: batchResponses }, 200)
   },
 )
 

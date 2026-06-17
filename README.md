@@ -188,5 +188,3 @@ bun run --filter=@apps/server deploy
 - **No event size limit:** Events larger than 10 KB are not rejected. Pusher returns HTTP `413` for oversized events. Large WebSocket messages may hit Cloudflare frame limits.
 
 - **No `auth_timestamp` clock skew check:** The REST API authentication middleware does not validate that the `auth_timestamp` query parameter falls within ±600 seconds of the current time. This means signed requests can be replayed indefinitely.
-
-- **`info` parameter not supported on event triggers:** The `POST /events` and `POST /batch_events` endpoints do not return channel attributes (`user_count`, `subscription_count`) when the `info` query parameter is provided.

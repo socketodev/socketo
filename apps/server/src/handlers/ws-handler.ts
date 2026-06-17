@@ -48,7 +48,10 @@ export class WebSocketHandler {
       } else if (this.isClientEvent(event)) {
         await this.handleClientEvent(ws, { event, channel, data })
       } else {
-        console.log('Message event handler not implemented.', event)
+        this.connections.sendTo(ws, {
+          event: 'pusher:error',
+          data: { code: 4009, message: 'Event not supported' },
+        })
       }
     } catch (e) {
       console.error('Failed to handle WebSocket message:', e)

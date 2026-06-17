@@ -8,24 +8,27 @@ export const querySchema = z.object({
   body_md5: z.string().optional(),
 })
 
-export const eventSchema = z.object({
-  name: z.string().nonempty(),
-  channels: z.array(z.string()).nonempty().optional(),
-  channel: z.string().nonempty().optional(),
-  data: z.string(),
-  socket_id: z.string().optional(),
-}).refine((data) => {
-  if (!data.channels && !data.channel) {
-    throw new z.ZodError([
-      {
-        code: z.ZodIssueCode.custom,
-        message: 'Either channels or channel is required',
-        path: ['channels'],
-      },
-    ])
-  }
-  return true
-})
+export const eventSchema = z
+  .object({
+    name: z.string().nonempty(),
+    channels: z.array(z.string()).nonempty().optional(),
+    channel: z.string().nonempty().optional(),
+    data: z.string(),
+    socket_id: z.string().optional(),
+    info: z.string().optional(),
+  })
+  .refine((data) => {
+    if (!data.channels && !data.channel) {
+      throw new z.ZodError([
+        {
+          code: 'custom',
+          message: 'Either channels or channel is required',
+          path: ['channels'],
+        },
+      ])
+    }
+    return true
+  })
 
 export type Event = z.infer<typeof eventSchema>
 
@@ -37,6 +40,7 @@ export const batchEventSchema = z.object({
         channel: z.string().nonempty(),
         data: z.string(),
         socket_id: z.string().optional(),
+        info: z.string().optional(),
       }),
     )
     .nonempty()
