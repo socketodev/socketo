@@ -9,7 +9,7 @@ export class AppHandler {
     this.db = this.createDatabase()
   }
 
-  public async getConfig(key?: string) {
+  public async getConfig(key?: string): Promise<App | undefined> {
     if (this.config) {
       return this.config
     }
@@ -22,8 +22,7 @@ export class AppHandler {
       }
     }
 
-    console.error(`App not found for key: ${key}`)
-    throw new Error(`App not found for key: ${key}`)
+    return undefined
   }
 
   private createDatabase() {

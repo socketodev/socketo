@@ -1,21 +1,17 @@
-import type { ConnectionManager } from '../managers/connection-manager'
-import type {
-  ParsedUserData,
-  PusherMessage,
-  SigninData,
-  SubscribeData,
-  UnsubscribeData,
-} from '../types'
 import {
-  isPresenceChannel,
-  isProtectedChannel,
-  verifyChannelAuth,
-  verifySigninAuth,
-} from '../utils/auth'
-import { isValidChannelName, isValidEventName } from '../utils/validation'
+  type AppPolicy,
+  RealtimeNamespace,
+  type SessionSnapshot,
+} from '@socketo/realtime-core'
+import type { BatchEvent, Event } from '../api/schemas/apps'
+import type { App } from '../database/types'
+import type { ConnectionManager } from '../managers/connection-manager'
+import { isAttachmentData } from '../types'
 import type { AppHandler } from './app-handler'
 
 export class WebSocketHandler {
+  private namespace: RealtimeNamespace | undefined
+
   constructor(
     private ctx: DurableObjectState,
     private connections: ConnectionManager,
@@ -33,308 +29,168 @@ export class WebSocketHandler {
     })
   }
 
-  public async handleMessage(ws: WebSocket, message: string) {
-    try {
-      const parsed = JSON.parse(message) as PusherMessage
-      const { event, channel, data } = parsed
+  public configure(config: App): RealtimeNamespace {
+    const policy = this.toPolicy(config)
 
-      if (event === 'pusher:signin') {
-        await this.handleSignin(ws, data as SigninData)
-      } else if (event === 'pusher:subscribe') {
-        await this.handleSubscribe(ws, data as SubscribeData)
-      } else if (event === 'pusher:unsubscribe') {
-        const channel = (data as UnsubscribeData)?.channel
-        if (channel) await this.handleUnsubscribe(ws, channel)
-      } else if (this.isClientEvent(event)) {
-        await this.handleClientEvent(ws, { event, channel, data })
-      } else {
-        this.connections.sendTo(ws, {
-          event: 'pusher:error',
-          data: { code: 4009, message: 'Event not supported' },
-        })
+    if (!this.namespace) {
+      this.namespace = new RealtimeNamespace(policy)
+
+      for (const ws of this.connections.getSockets()) {
+        const snapshot = ws.deserializeAttachment()
+        if (!isAttachmentData(snapshot)) {
+          this.connections.remove(ws)
+          try {
+            ws.close(1002, 'Invalid connection state')
+          } catch {
+            // The socket may already be closed.
+          }
+          continue
+        }
+        const session: SessionSnapshot = {
+          id: snapshot.id,
+          channels: [...snapshot.channels],
+        }
+        if (snapshot.user_id) session.userId = snapshot.user_id
+        if (snapshot.user_info) session.userInfo = snapshot.user_info
+        if (snapshot.presence_user_id) {
+          session.presenceUserId = snapshot.presence_user_id
+        }
+        if (snapshot.presence_user_info) {
+          session.presenceUserInfo = snapshot.presence_user_info
+        }
+        this.namespace.restore(this.connections.toConnection(ws), session)
       }
-    } catch (e) {
-      console.error('Failed to handle WebSocket message:', e)
-    }
-  }
-
-  public handleClose(ws: WebSocket) {
-    const { channels, user_id } = ws.deserializeAttachment()
-
-    for (const channel of channels) {
-      if (isPresenceChannel(channel) && user_id) {
-        this.connections.broadcast(channel, 'pusher_internal:member_removed', {
-          user_id,
-        })
-      }
-    }
-
-    this.connections.unsubscribeAll(ws)
-    this.connections.remove(ws)
-  }
-
-  private async handleSignin(
-    ws: WebSocket,
-    data: { auth?: string; user_data?: string },
-  ) {
-    if (!data.auth || !data.user_data) {
-      return this.connections.sendTo(ws, {
-        event: 'pusher:error',
-        data: {
-          code: 4009,
-          message: 'Invalid signin data: auth and user_data required',
-        },
-      })
-    }
-
-    const { id: socketId } = ws.deserializeAttachment()
-    const config = await this.app.getConfig(this.ctx.id.name)
-
-    const isValid = verifySigninAuth(
-      socketId,
-      data.user_data,
-      data.auth,
-      config.secret,
-      config.key,
-    )
-
-    if (!isValid) {
-      return this.connections.sendTo(ws, {
-        event: 'pusher:error',
-        data: {
-          code: 4009,
-          message: 'Invalid signin signature',
-        },
-      })
-    }
-
-    try {
-      const userData = JSON.parse(data.user_data) as ParsedUserData
-
-      const state = ws.deserializeAttachment()
-      state.user_id = userData.id
-      state.user_info = userData.user_info
-      ws.serializeAttachment(state)
-
-      this.connections.sendTo(ws, {
-        event: 'pusher:signin_success',
-        data: { user_data: data.user_data },
-      })
-    } catch {
-      return this.connections.sendTo(ws, {
-        event: 'pusher:error',
-        data: {
-          code: 4009,
-          message: 'Invalid user_data JSON',
-        },
-      })
-    }
-  }
-
-  private async handleSubscribe(
-    ws: WebSocket,
-    data: { channel: string; auth?: string; channel_data?: string },
-  ) {
-    if (!isValidChannelName(data.channel)) {
-      return this.connections.sendTo(ws, {
-        event: 'pusher:error',
-        channel: data.channel,
-        data: {
-          code: 4009,
-          message: 'Invalid channel name',
-        },
-      })
-    }
-
-    const { channels } = ws.deserializeAttachment()
-    if (channels.has(data.channel)) {
-      return this.connections.sendTo(ws, {
-        event: 'pusher_internal:subscription_succeeded',
-        channel: data.channel,
-        data: isPresenceChannel(data.channel)
-          ? this.connections.getPresenceData(data.channel)
-          : {},
-      })
-    }
-
-    if (isProtectedChannel(data.channel)) {
-      if (!data.auth) {
-        return this.connections.sendTo(ws, {
-          event: 'pusher:error',
-          channel: data.channel,
-          data: {
-            code: 4009,
-            message: 'Auth string required for protected channel',
-          },
-        })
-      }
-
-      const { id: socketId } = ws.deserializeAttachment()
-      const config = await this.app.getConfig(this.ctx.id.name)
-
-      const isValid = verifyChannelAuth(
-        socketId,
-        data.channel,
-        data.auth,
-        config.secret,
-        config.key,
-      )
-
-      if (!isValid) {
-        return this.connections.sendTo(ws, {
-          event: 'pusher:error',
-          channel: data.channel,
-          data: {
-            code: 4009,
-            message: 'Invalid channel auth signature',
-          },
-        })
-      }
-    }
-
-    if (isPresenceChannel(data.channel)) {
-      await this.handlePresenceSubscribe(ws, data)
     } else {
-      this.connections.subscribe(ws, data.channel)
+      this.namespace.updatePolicy(policy)
+    }
 
-      this.connections.sendTo(ws, {
-        event: 'pusher_internal:subscription_succeeded',
-        channel: data.channel,
-        data: {},
-      })
+    return this.namespace
+  }
+
+  public async getNamespace(): Promise<RealtimeNamespace> {
+    const config = await this.app.getConfig(this.ctx.id.name)
+    if (!config) throw new Error(`App not found for key: ${this.ctx.id.name}`)
+    return this.configure(config)
+  }
+
+  public register(ws: WebSocket) {
+    if (!this.namespace) {
+      throw new Error('WebSocket namespace is not configured')
+    }
+
+    const connection = this.connections.toConnection(ws)
+    this.namespace.connect(connection)
+    const snapshot = this.namespace.getSession(connection.id)
+    if (!snapshot || !this.connections.syncSession(ws, snapshot)) {
+      this.connections.remove(ws)
+      void this.namespace.disconnect(connection.id)
+      ws.close(4200, 'Connection state too large')
     }
   }
 
-  private async handlePresenceSubscribe(
-    ws: WebSocket,
-    data: { channel: string; channel_data?: string },
-  ) {
-    const { id, user_id } = ws.deserializeAttachment()
-    if (!user_id) {
-      return this.connections.sendTo(ws, {
-        event: 'pusher:error',
-        channel: data.channel,
-        data: {
-          code: 4009,
-          message: 'User must be signed in to subscribe to presence channel',
-        },
-      })
+  public async handleMessage(ws: WebSocket, message: string) {
+    const namespace = await this.getNamespace()
+    const attachment = ws.deserializeAttachment()
+    if (!isAttachmentData(attachment)) {
+      const socketId = this.connections.remove(ws)
+      if (socketId) await namespace.disconnect(socketId)
+      ws.close(1002, 'Invalid connection state')
+      return
     }
+    const { id } = attachment
 
-    try {
-      const channelData = data.channel_data
-        ? (JSON.parse(data.channel_data) as {
-            user_id: string
-            user_info?: Record<string, unknown>
-          })
-        : null
+    await namespace.receive(id, message)
 
-      const state = ws.deserializeAttachment()
-      if (channelData?.user_info) {
-        state.user_info = channelData.user_info
+    const snapshot = namespace.getSession(id)
+    if (!snapshot || !this.connections.syncSession(ws, snapshot, attachment)) {
+      this.connections.remove(ws)
+      await namespace.disconnect(id)
+      ws.close(4200, 'Connection state too large')
+    }
+  }
+
+  public async handleClose(ws: WebSocket) {
+    const snapshot = ws.deserializeAttachment()
+    if (!isAttachmentData(snapshot)) {
+      const socketId = this.connections.remove(ws)
+      if (socketId && this.namespace) {
+        await this.namespace.disconnect(socketId)
       }
-      ws.serializeAttachment(state)
-
-      const { user_info } = ws.deserializeAttachment()
-      this.connections.subscribe(ws, data.channel, user_id)
-
-      const presenceData = this.connections.getPresenceData(data.channel)
-
-      this.connections.sendTo(ws, {
-        event: 'pusher_internal:subscription_succeeded',
-        channel: data.channel,
-        data: presenceData,
-      })
-
-      this.connections.broadcast(
-        data.channel,
-        'pusher_internal:member_added',
-        {
-          user_id,
-          user_info: user_info || {},
-        },
-        id,
-      )
-    } catch {
-      return this.connections.sendTo(ws, {
-        event: 'pusher:error',
-        channel: data.channel,
-        data: {
-          code: 4009,
-          message: 'Invalid channel_data JSON',
-        },
-      })
-    }
-  }
-
-  private async handleUnsubscribe(ws: WebSocket, channel: string) {
-    if (isPresenceChannel(channel)) {
-      const { id, user_id } = ws.deserializeAttachment()
-      if (user_id) {
-        this.connections.broadcast(
-          channel,
-          'pusher_internal:member_removed',
-          {
-            user_id,
-          },
-          id,
-        )
-      }
-    }
-
-    this.connections.unsubscribe(ws, channel)
-  }
-
-  private isClientEvent(event: string) {
-    return event.startsWith('client-')
-  }
-
-  private async handleClientEvent(ws: WebSocket, message: PusherMessage) {
-    const { event, channel, data } = message
-
-    if (!isValidEventName(event)) {
       return
     }
 
-    if (channel && !isProtectedChannel(channel)) {
-      return this.connections.sendTo(ws, {
-        event: 'pusher:error',
-        channel,
-        data: {
-          code: 4009,
-          message:
-            'Client events are only allowed on private or presence channels',
-        },
-      })
-    }
-
-    const config = await this.app.getConfig(this.ctx.id.name)
-    if (!config.enable_client_events) {
-      return this.connections.sendTo(ws, {
-        event: 'pusher:error',
-        channel,
-        data: {
-          code: 4009,
-          message: 'Client events are not enabled',
-        },
-      })
-    }
-
-    const { id, channels } = ws.deserializeAttachment()
-    if (channel && channels.has(channel)) {
-      const broadcastData =
-        typeof data === 'string' ? data : JSON.stringify(data)
-      if (isPresenceChannel(channel)) {
-        const { user_id } = ws.deserializeAttachment()
-        this.connections.broadcast(channel, event, broadcastData, id, user_id)
-      } else {
-        this.connections.broadcast(channel, event, broadcastData, id)
+    try {
+      if (this.namespace) {
+        await this.namespace.disconnect(snapshot.id)
+      } else if (snapshot.channels.size > 0) {
+        await (await this.getNamespace()).disconnect(snapshot.id)
       }
+    } finally {
+      this.connections.remove(ws)
     }
+  }
+
+  public async broadcast(payload: Event | BatchEvent) {
+    const namespace = await this.getNamespace()
+
+    if ('batch' in payload) {
+      for (const item of payload.batch) {
+        await namespace.broadcast({
+          channel: item.channel,
+          event: item.name,
+          data: item.data,
+          exceptId: item.socket_id,
+        })
+      }
+      return
+    }
+
+    const channels =
+      payload.channels ?? (payload.channel ? [payload.channel] : [])
+    for (const channel of channels) {
+      await namespace.broadcast({
+        channel,
+        event: payload.name,
+        data: payload.data,
+        exceptId: payload.socket_id,
+      })
+    }
+  }
+
+  public async getChannels() {
+    return (await this.getNamespace()).getChannels()
+  }
+
+  public async getChannelsWithInfo() {
+    return (await this.getNamespace()).getChannelsWithInfo()
+  }
+
+  public async getChannel(channel: string) {
+    return (await this.getNamespace()).getChannel(channel)
+  }
+
+  public async getChannelUsers(channel: string) {
+    return (await this.getNamespace()).getChannelUsers(channel)
+  }
+
+  public async terminateUserConnections(userId: string) {
+    await (await this.getNamespace()).terminateUserConnections(userId)
+  }
+
+  public getSocketCount() {
+    return this.namespace?.getSocketCount() ?? this.connections.getSocketCount()
   }
 
   public canAcceptNewConnection(maxConnections: number) {
     if (maxConnections === -1) return true
-    return this.connections.getSocketCount() + 1 <= maxConnections
+    return this.getSocketCount() + 1 <= maxConnections
+  }
+
+  private toPolicy(config: App): AppPolicy {
+    return {
+      key: config.key,
+      secret: config.secret,
+      enableClientEvents: config.enable_client_events,
+    }
   }
 }

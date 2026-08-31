@@ -4,9 +4,12 @@ import { HTTPException } from 'hono/http-exception'
 import type { HonoContext } from '@/types'
 import { querySchema } from '../schemas/apps'
 
-function generateQueryString(rest: Record<string, string>): string {
+function generateQueryString(rest: Record<string, string | undefined>): string {
   const keys = Object.keys(rest).sort()
-  return keys.map((key) => `${key}=${rest[key]}`).join('&')
+  return keys
+    .filter((key) => rest[key] !== undefined)
+    .map((key) => `${key.toLowerCase()}=${String(rest[key])}`)
+    .join('&')
 }
 
 function verifySignature(secret: string, body: string) {
@@ -26,6 +29,25 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
 
   const { secret } = c.get('app')
   const { auth_signature, ...rest } = parsed.data
+
+  if (rest.auth_version !== '1.0') {
+    throw new HTTPException(401, {
+      message: 'Invalid auth_version. Must be 1.0.',
+    })
+  }
+
+  const now = Math.floor(Date.now() / 1000)
+  const timestamp = parseInt(rest.auth_timestamp, 10)
+  if (!Number.isInteger(timestamp) || timestamp <= 0) {
+    throw new HTTPException(401, {
+      message: 'Invalid auth_timestamp. Must be a Unix timestamp.',
+    })
+  }
+  if (Math.abs(now - timestamp) > 600) {
+    throw new HTTPException(401, {
+      message: 'auth_timestamp must be within 600 seconds of current time.',
+    })
+  }
 
   if (['POST', 'PUT', 'PATCH'].includes(c.req.method)) {
     const body = await c.req.text()

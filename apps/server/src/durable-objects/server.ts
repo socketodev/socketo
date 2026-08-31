@@ -1,9 +1,9 @@
 import { DurableObject } from 'cloudflare:workers'
+import { serializeMessage } from '@socketo/realtime-core'
 import type { BatchEvent, Event } from '@/api/schemas/apps'
 import { AppHandler } from '@/handlers/app-handler'
 import { WebSocketHandler } from '@/handlers/ws-handler'
 import { ConnectionManager } from '@/managers/connection-manager'
-import { isPresenceChannel } from '@/utils/auth'
 
 export class ServerDO extends DurableObject<Env> {
   private app: AppHandler
@@ -19,84 +19,44 @@ export class ServerDO extends DurableObject<Env> {
   }
 
   public webSocketMessage(ws: WebSocket, message: string) {
-    this.ws.handleMessage(ws, message)
+    return this.ws.handleMessage(ws, message)
   }
 
   public webSocketClose(ws: WebSocket) {
-    this.ws.handleClose(ws)
+    return this.ws.handleClose(ws)
   }
 
-  public webSocketError(ws: WebSocket, error: unknown) {
-    const { id } = ws.deserializeAttachment()
-    console.error('WebSocket Error:', id, error)
+  public webSocketError(ws: WebSocket, error: Error) {
+    const attachment = ws.deserializeAttachment()
+    console.error('WebSocket Error:', attachment?.id, error)
   }
 
   public broadcast(payload: Event | BatchEvent) {
-    if ('batch' in payload) {
-      for (const item of payload.batch) {
-        const { name, channel, data, socket_id } = item
-        this.connections.broadcast(channel, name, data, socket_id)
-      }
-    } else {
-      const { name, data, socket_id } = payload
-      const channels =
-        payload.channels ?? (payload.channel ? [payload.channel] : [])
-      for (const channel of channels) {
-        this.connections.broadcast(channel, name, data, socket_id)
-      }
-    }
+    return this.ws.broadcast(payload)
   }
 
   public getChannels() {
-    const channels = new Map<string, number>()
-
-    for (const [channel, sockets] of this.connections.getChannels()) {
-      channels.set(channel, sockets.size)
-    }
-
-    return channels
+    return this.ws.getChannels()
   }
 
   public getChannelsWithInfo() {
-    const result = new Map<
-      string,
-      { subscription_count: number; user_count: number }
-    >()
-
-    for (const [channel, sockets] of this.connections.getChannels()) {
-      result.set(channel, {
-        subscription_count: sockets.size,
-        user_count: this.connections.getMemberCount(channel),
-      })
-    }
-
-    return result
+    return this.ws.getChannelsWithInfo()
   }
 
   public getChannel(channelName: string) {
-    const occupancy = this.connections.getChannelOccupancy(channelName)
-
-    if (!occupancy.occupied) {
-      return null
-    }
-
-    return occupancy
+    return this.ws.getChannel(channelName)
   }
 
   public getChannelUsers(channelName: string) {
-    if (!isPresenceChannel(channelName)) {
-      return null
-    }
-
-    return this.connections.getPresenceChannelUsers(channelName)
+    return this.ws.getChannelUsers(channelName)
   }
 
-  public terminateUserConnections(userId: string) {
-    this.connections.terminateUserConnections(userId)
+  public async terminateUserConnections(userId: string) {
+    await this.ws.terminateUserConnections(userId)
   }
 
   public getSocketCount() {
-    return this.connections.getSocketCount()
+    return this.ws.getSocketCount()
   }
 
   public async fetch(request: Request): Promise<Response> {
@@ -106,38 +66,44 @@ export class ServerDO extends DurableObject<Env> {
     const protocol = url.searchParams.get('protocol')
     if (!protocol) {
       return this.rejectConnection(4008, 'No protocol version supplied')
-    } else if (Number(protocol) !== 7) {
+    } else if (protocol !== '7') {
       return this.rejectConnection(4007, 'Unsupported protocol version')
     }
 
-    const app = await this.app.getConfig(key).catch(() => null)
+    const app = await this.app.getConfig(key)
     if (!app) {
       return this.rejectConnection(4001, 'App not found')
     }
+
+    this.ws.configure(app)
 
     if (!this.ws.canAcceptNewConnection(app.max_connections)) {
       return this.rejectConnection(4004, 'Connection quota exceeded')
     }
 
     const { client, server, socketId } = this.connections.upgrade()
+    this.ws.register(server)
 
-    this.connections.sendTo(server, {
-      event: 'pusher:connection_established',
-      data: {
-        socket_id: socketId,
-        activity_timeout: 120,
-      },
-    })
+    this.connections.sendTo(
+      server,
+      serializeMessage({
+        event: 'pusher:connection_established',
+        data: {
+          socket_id: socketId,
+          activity_timeout: 120,
+        },
+      }),
+    )
 
     return new Response(null, { status: 101, webSocket: client })
   }
 
   private rejectConnection(code: number, message: string): Response {
     const { client, server } = this.connections.upgrade()
-    this.connections.sendTo(server, {
-      event: 'pusher:error',
-      data: { code, message },
-    })
+    this.connections.sendTo(
+      server,
+      serializeMessage({ event: 'pusher:error', data: { code, message } }),
+    )
     server.close(code, message)
     return new Response(null, { status: 101, webSocket: client })
   }

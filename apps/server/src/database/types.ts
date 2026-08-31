@@ -11,7 +11,7 @@ export interface AppsTable {
   secret: string
   max_connections: number
   enable_client_events: boolean
-  location_hint?: DurableObjectLocationHint
+  location_hint: DurableObjectLocationHint | null
 }
 
 export type App = Selectable<AppsTable>

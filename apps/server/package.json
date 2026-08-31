@@ -4,11 +4,13 @@
   "scripts": {
     "dev": "vite dev --port 8787",
     "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "preview": "vite build && vite preview",
     "deploy": "vite build && wrangler deploy",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@socketo/realtime-core": "workspace:*",
     "hono": "^4.12.16",
     "kysely": "^0.28.16",
     "zod": "^4.4.2"

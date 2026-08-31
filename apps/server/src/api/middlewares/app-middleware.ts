@@ -14,7 +14,7 @@ export const appMiddleware = createMiddleware<HonoContext>(async (c, next) => {
 
   c.set('app', {
     stub: c.env.ServerDO.get(c.env.ServerDO.idFromName(key), {
-      locationHint: app.location_hint,
+      locationHint: app.location_hint ?? undefined,
     }),
     secret: app.secret,
   })
