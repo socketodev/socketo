@@ -173,8 +173,12 @@ bun install
 
 2. Run database migrations:
    ```bash
-   curl -X POST http://localhost:8787/migrate
+   curl -X POST \
+     -H "Authorization: Bearer <ADMIN_API_TOKEN>" \
+     http://localhost:8787/migrate
    ```
+
+   For local development, create `apps/server/.dev.vars` from `apps/server/.dev.vars.example` and set `ADMIN_API_TOKEN`. For a deployed Worker, configure it with `wrangler secret put ADMIN_API_TOKEN`.
 
 3. Add your app record via [Local Explorer](https://developers.cloudflare.com/workers/development-testing/local-explorer/):
    - Go to [http://localhost:8787/cdn-cgi/explorer](http://localhost:8787/cdn-cgi/explorer/do/DatabaseDO/default?table=apps)

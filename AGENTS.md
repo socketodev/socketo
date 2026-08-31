@@ -22,7 +22,7 @@
 ## Local Worker Setup
 
 - Start the Worker before initializing local data: `bun run --filter=@socketo/server dev`.
-- Run `curl -X POST http://localhost:8787/migrate` after startup; `/migrate` is intentionally forbidden when `NODE_ENV=production`.
+- Run `curl -X POST -H "Authorization: Bearer <ADMIN_API_TOKEN>" http://localhost:8787/migrate` after setting `ADMIN_API_TOKEN` in `apps/server/.dev.vars`; deployed Workers require the `ADMIN_API_TOKEN` secret.
 - Add an app row through Wrangler Local Explorer at `http://localhost:8787/cdn-cgi/explorer/do/DatabaseDO/default?table=apps`; the required fields and defaults are documented in `README.md`.
 - Database schema migrations are defined in `apps/server/src/database/migrations.ts` and executed by `DatabaseDO`; Wrangler Durable Object class migrations are separately declared in `apps/server/wrangler.jsonc`.
 
