@@ -1,8 +1,8 @@
 {
   "name": "@socketo/core",
-  "version": "0.0.1",
-  "description": "Node.js Pusher-compatible realtime protocol core",
-  "private": false,
+  "version": "0.0.3",
+  "description": "Internal Pusher-compatible realtime protocol core",
+  "private": true,
   "type": "module",
   "license": "GPL-3.0",
   "engines": {

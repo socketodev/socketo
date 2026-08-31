@@ -1,0 +1,96 @@
+name: Release & Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Manual Version Bump Type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Build Packages
+        run: bun run build
+
+      - name: Determine Version Bump
+        id: bump
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "type=${{ github.event.inputs.bump_type }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          echo "Last commit message: $COMMIT_MSG"
+
+          if echo "$COMMIT_MSG" | grep -qE "^feat(\(.*\))?!:|^.*BREAKING CHANGE:"; then
+            echo "type=major" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qE "^feat(\(.*\))?:"; then
+            echo "type=minor" >> $GITHUB_OUTPUT
+          else
+            echo "type=patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump Version & Create Git Tag
+        id: versioning
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BUMP_TYPE="${{ steps.bump.outputs.type }}"
+          echo "Applying bump type: $BUMP_TYPE"
+
+          cd packages/cli
+          NEW_VERSION=$(npm version $BUMP_TYPE --no-git-tag-version)
+          cd ../..
+
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          # Commit updated package.json and create tag
+          git add packages/cli/package.json
+          git commit -m "chore(release): $NEW_VERSION [skip ci]"
+          git tag "$NEW_VERSION"
+          git push origin main --tags
+
+      - name: Publish to NPM
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd packages/cli
+          npm publish --access public
