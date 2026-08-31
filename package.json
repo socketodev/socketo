@@ -1,12 +1,15 @@
 {
   "name": "socketo",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.14",
+    "@oxlint/plugins": "1.80.0",
+    "oxlint": "1.80.0",
     "turbo": "^2.9.7",
     "typescript": "6.0.3"
   },
