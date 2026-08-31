@@ -45,9 +45,6 @@ jobs:
       - name: Install Dependencies
         run: bun install
 
-      - name: Build Packages
-        run: bun run build
-
       - name: Determine Version Bump
         id: bump
         run: |
@@ -56,23 +53,27 @@ jobs:
             exit 0
           fi
 
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
-          echo "Last commit message: $COMMIT_MSG"
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            COMMIT_LOG=$(git log ${LAST_TAG}..HEAD --oneline)
+          else
+            COMMIT_LOG=$(git log --oneline)
+          fi
 
-          if echo "$COMMIT_MSG" | grep -qE "^feat(\(.*\))?!:|^.*BREAKING CHANGE:"; then
+          echo "Commits since last tag:"
+          echo "$COMMIT_LOG"
+
+          if echo "$COMMIT_LOG" | grep -qE "^[a-f0-9]+ feat(\(.*\))?!:|^[a-f0-9]+ .*BREAKING CHANGE:"; then
             echo "type=major" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -qE "^feat(\(.*\))?:"; then
+          elif echo "$COMMIT_LOG" | grep -qE "^[a-f0-9]+ feat(\(.*\))?:"; then
             echo "type=minor" >> $GITHUB_OUTPUT
           else
             echo "type=patch" >> $GITHUB_OUTPUT
           fi
 
-      - name: Bump Version & Create Git Tag
+      - name: Bump Version
         id: versioning
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
           BUMP_TYPE="${{ steps.bump.outputs.type }}"
           echo "Applying bump type: $BUMP_TYPE"
 
@@ -82,10 +83,18 @@ jobs:
 
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-          # Commit updated package.json and create tag
+      - name: Build Packages
+        run: bun run build
+
+      - name: Commit, Tag & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          NEW_VERSION="${{ steps.versioning.outputs.new_version }}"
           git add packages/cli/package.json
-          git commit -m "chore(release): $NEW_VERSION [skip ci]"
-          git tag "$NEW_VERSION"
+          git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
+          git tag "${NEW_VERSION}"
           git push origin main --tags
 
       - name: Publish to NPM
@@ -94,3 +103,4 @@ jobs:
         run: |
           cd packages/cli
           npm publish --access public
+
