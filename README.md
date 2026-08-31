@@ -8,7 +8,7 @@ Pusher-compatible realtime WebSocket server, built on Cloudflare Durable Objects
 |---|---|---|
 | **`@socketo/server`** | [`apps/server/`](./apps/server/) | Self-hosted Cloudflare Worker server backed by `ServerDO` and `DatabaseDO` (SQLite) |
 | **`@socketo/cli`** | [`packages/cli/`](./packages/cli/) | Local standalone Pusher server + CLI tool for development (`npx @socketo/cli start`) |
-| **`@socketo/core`** | [`packages/realtime-core/`](./packages/realtime-core/) | Shared, runtime-agnostic Pusher Channels Protocol v7 state machine and authentication core |
+| **`@socketo/core`** | [`packages/core/`](./packages/core/) | Shared, runtime-agnostic Pusher Channels Protocol v7 state machine and authentication core |
 
 ## Table of Contents
 

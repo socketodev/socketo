@@ -1,5 +1,5 @@
 import readline from 'node:readline'
-import type { JsonValue } from '@socketo/realtime-core'
+import type { JsonValue } from '@socketo/core'
 import type { SocketoServer } from './worker.js'
 
 const DIM = '\x1b[2m'

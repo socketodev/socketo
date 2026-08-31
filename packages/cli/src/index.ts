@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { parseArgs } from 'node:util'
-import type { JsonValue } from '@socketo/realtime-core'
-import { signRestRequest } from '@socketo/realtime-core'
+import type { JsonValue } from '@socketo/core'
+import { signRestRequest } from '@socketo/core'
 import { startInteractiveRepl } from './repl.js'
 import { SocketoServer } from './worker.js'
 

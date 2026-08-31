@@ -37,20 +37,20 @@
       },
       "dependencies": {
         "@hono/node-server": "^2.1.1",
-        "@socketo/core": "workspace:*",
         "hono": "^4.13.5",
         "ws": "^8.18.0",
       },
       "devDependencies": {
+        "@socketo/core": "workspace:*",
         "@types/node": "^25.6.0",
         "@types/ws": "^8.5.10",
         "rolldown": "1.0.0-rc.17",
         "typescript": "^6.0.3",
       },
     },
-    "packages/realtime-core": {
+    "packages/core": {
       "name": "@socketo/core",
-      "version": "0.0.1",
+      "version": "0.0.3",
       "devDependencies": {
         "@types/node": "^25.6.0",
       },
@@ -297,7 +297,7 @@
 
     "@socketo/cli": ["@socketo/cli@workspace:packages/cli"],
 
-    "@socketo/core": ["@socketo/core@workspace:packages/realtime-core"],
+    "@socketo/core": ["@socketo/core@workspace:packages/core"],
 
     "@socketo/server": ["@socketo/server@workspace:apps/server"],
 
