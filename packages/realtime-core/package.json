@@ -1,5 +1,5 @@
 {
-  "name": "@socketo/realtime-core",
+  "name": "@socketo/core",
   "version": "0.0.1",
   "description": "Node.js Pusher-compatible realtime protocol core",
   "private": false,

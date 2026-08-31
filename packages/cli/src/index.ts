@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import type { JsonValue } from '@socketo/realtime-core'
+import type { JsonValue } from '@socketo/core'
 import {
   type AuthRequest,
   decodeAuthResponse,

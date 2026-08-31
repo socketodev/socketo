@@ -1,5 +1,5 @@
 {
-  "name": "@apps/server",
+  "name": "@socketo/server",
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 8787",
@@ -10,7 +10,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "@socketo/realtime-core": "workspace:*",
+    "@socketo/core": "workspace:*",
     "hono": "^4.12.16",
     "kysely": "^0.28.16",
     "zod": "^4.4.2"

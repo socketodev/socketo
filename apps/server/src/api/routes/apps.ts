@@ -1,4 +1,4 @@
-import { invalidInfoAttribute } from '@socketo/realtime-core'
+import { invalidInfoAttribute } from '@socketo/core'
 import { Hono } from 'hono'
 import { validator } from 'hono/validator'
 import type { HonoContext } from '@/types'

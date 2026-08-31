@@ -1,8 +1,4 @@
-import {
-  isStringValue,
-  type JsonObject,
-  type JsonValue,
-} from '@socketo/realtime-core'
+import { isStringValue, type JsonObject, type JsonValue } from '@socketo/core'
 import type { Context } from 'hono'
 import type { ServerDO } from './durable-objects/server'
 

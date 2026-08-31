@@ -6,9 +6,9 @@ Pusher-compatible realtime WebSocket server, built on Cloudflare Durable Objects
 
 | Package / App | Path | Description |
 |---|---|---|
-| **`@apps/server`** | [`apps/server/`](./apps/server/) | Self-hosted Cloudflare Worker server backed by `ServerDO` and `DatabaseDO` (SQLite) |
+| **`@socketo/server`** | [`apps/server/`](./apps/server/) | Self-hosted Cloudflare Worker server backed by `ServerDO` and `DatabaseDO` (SQLite) |
 | **`@socketo/cli`** | [`packages/cli/`](./packages/cli/) | Local standalone Pusher server + CLI tool for development (`npx @socketo/cli start`) |
-| **`@socketo/realtime-core`** | [`packages/realtime-core/`](./packages/realtime-core/) | Shared, runtime-agnostic Pusher Channels Protocol v7 state machine and authentication core |
+| **`@socketo/core`** | [`packages/realtime-core/`](./packages/realtime-core/) | Shared, runtime-agnostic Pusher Channels Protocol v7 state machine and authentication core |
 
 ## Table of Contents
 
@@ -167,8 +167,8 @@ bun install
 
 1. Start the server locally:
    ```bash
-   bun run dev                        # all apps
-   bun run --filter=@apps/server dev  # server only
+   bun run dev                          # all apps
+   bun run --filter=@socketo/server dev # server only
    ```
 
 2. Run database migrations:
@@ -184,7 +184,7 @@ bun install
 Deploy to Cloudflare Workers:
 
 ```bash
-bun run --filter=@apps/server deploy
+bun run --filter=@socketo/server deploy
 ```
 
 ## Known Limitations

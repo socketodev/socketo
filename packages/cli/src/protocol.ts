@@ -1,6 +1,6 @@
-import type { JsonObject, JsonValue } from '@socketo/realtime-core'
+import type { JsonObject, JsonValue } from '@socketo/core'
 
-export type { JsonObject, JsonValue } from '@socketo/realtime-core'
+export type { JsonObject, JsonValue } from '@socketo/core'
 
 export type DisplayMessage = {
   event: string

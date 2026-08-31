@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
-import { serializeMessage } from '@socketo/realtime-core'
+import { serializeMessage } from '@socketo/core'
 import type { BatchEvent, Event } from '@/api/schemas/apps'
 import { AppHandler } from '@/handlers/app-handler'
 import { WebSocketHandler } from '@/handlers/ws-handler'

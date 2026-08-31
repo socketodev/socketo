@@ -2,7 +2,7 @@ import {
   type AppPolicy,
   RealtimeNamespace,
   type SessionSnapshot,
-} from '@socketo/realtime-core'
+} from '@socketo/core'
 import type { BatchEvent, Event } from '../api/schemas/apps'
 import type { App } from '../database/types'
 import type { ConnectionManager } from '../managers/connection-manager'
