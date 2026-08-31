@@ -1,5 +1,7 @@
 {
   "name": "@socketo/server",
+  "version": "0.0.5",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 8787",

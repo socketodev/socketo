@@ -191,6 +191,16 @@ Deploy to Cloudflare Workers:
 bun run --filter=@socketo/server deploy
 ```
 
+## Releases
+
+Add a changeset for each releasable change:
+
+```bash
+bun run changeset
+```
+
+The release workflow creates a version pull request and, after it is merged, creates Git tags without GitHub Releases. `@socketo/server` is versioned and tagged as a private package but is never published to npm. `@socketo/cli` is versioned, tagged, and published to npm. `@socketo/core` is not independently versioned; include the affected server or CLI package in a changeset when a core change requires a release.
+
 ## Known Limitations
 
 - **In-memory config caching:** `AppHandler` caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) in memory after the first database read. If you update an app's configuration via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
