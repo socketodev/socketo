@@ -2,7 +2,13 @@
 
 Pusher-compatible realtime WebSocket server, built on Cloudflare Durable Objects.
 
-All server code lives in [`apps/server/`](./apps/server/).
+## Monorepo Overview
+
+| Package / App | Path | Description |
+|---|---|---|
+| **`@apps/server`** | [`apps/server/`](./apps/server/) | Self-hosted Cloudflare Worker server backed by `ServerDO` and `DatabaseDO` (SQLite) |
+| **`@socketo/cli`** | [`packages/cli/`](./packages/cli/) | Local standalone Pusher server + CLI tool for development (`npx @socketo/cli start`) |
+| **`@socketo/realtime-core`** | [`packages/realtime-core/`](./packages/realtime-core/) | Shared, runtime-agnostic Pusher Channels Protocol v7 state machine and authentication core |
 
 ## Table of Contents
 
@@ -63,8 +69,8 @@ Each app is identified by a unique key/secret pair. The server verifies HMAC-sig
 |--------|------|-------------|
 | `GET` | `/app/:key` | WebSocket upgrade. Requires `Upgrade: websocket` header and `?protocol=7` query param |
 | `GET` | `/apps/:key/sockets` | Active socket count |
-| `GET` | `/apps/:key/channels` | Channel list with subscription counts. Supports `filter_by_prefix` query param (e.g. `?filter_by_prefix=presence-`) |
-| `GET` | `/apps/:key/channels/:channel_name` | Single channel info (`occupied`, `user_count`, `subscription_count`) |
+| `GET` | `/apps/:key/channels` | Occupied channel list with optional `info` attributes and `filter_by_prefix` (e.g. `?filter_by_prefix=presence-&info=user_count`) |
+| `GET` | `/apps/:key/channels/:channel_name` | Single channel info (`occupied`, with optional `user_count` or `subscription_count`) |
 | `GET` | `/apps/:key/channels/:channel_name/users` | List of user IDs subscribed to a presence channel |
 | `POST` | `/apps/:key/events` | Trigger a single event |
 | `POST` | `/apps/:key/batch_events` | Trigger multiple events |
@@ -175,7 +181,7 @@ bun install
    - Click **Add Row**
    - Fill and save.
 
-Deploy manually:
+Deploy to Cloudflare Workers:
 
 ```bash
 bun run --filter=@apps/server deploy
@@ -185,6 +191,4 @@ bun run --filter=@apps/server deploy
 
 - **In-memory config caching:** `AppHandler` caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) in memory after the first database read. If you update an app's configuration via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
 
-- **No event size limit:** Events larger than 10 KB are not rejected. Pusher returns HTTP `413` for oversized events. Large WebSocket messages may hit Cloudflare frame limits.
-
-- **No `auth_timestamp` clock skew check:** The REST API authentication middleware does not validate that the `auth_timestamp` query parameter falls within ±600 seconds of the current time. This means signed requests can be replayed indefinitely.
+- **Unconstrained event size:** Server-side event payloads are not capped to 10 KB by default in the self-hosted edition, allowing larger custom payloads. Large WebSocket messages may still hit Cloudflare platform frame limits.
