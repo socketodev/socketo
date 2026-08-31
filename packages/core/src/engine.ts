@@ -288,8 +288,7 @@ export class RealtimeNamespace {
 
       const requested = item.info.split(',').map((s) => s.trim())
       const includeUserCount = requested.includes('user_count')
-      const includeSubscriptionCount =
-        requested.includes('subscription_count')
+      const includeSubscriptionCount = requested.includes('subscription_count')
 
       const occ = this.getChannel(item.channel)
       const attrs: Record<string, number> = {}
@@ -391,10 +390,9 @@ export class RealtimeNamespace {
     }))
   }
 
-  public queryChannels(options?: {
-    filterByPrefix?: string
-    info?: string
-  }): { channels: Record<string, ChannelAttributes> } {
+  public queryChannels(options?: { filterByPrefix?: string; info?: string }): {
+    channels: Record<string, ChannelAttributes>
+  } {
     const requestedAttrs = options?.info
       ? options.info.split(',').map((s) => s.trim())
       : []

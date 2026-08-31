@@ -52,14 +52,24 @@ describe('SocketoServer logging', () => {
     })
 
     const app = server.createApp()
-    const res = await app.request(`/apps/local/events?${queryParams.toString()}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-    })
+    const res = await app.request(
+      `/apps/local/events?${queryParams.toString()}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      },
+    )
 
     expect(res.status).toBe(200)
-    expect(logs.some((l) => l.includes('trigger') && l.includes('my-event') && l.includes('public-test'))).toBe(true)
+    expect(
+      logs.some(
+        (l) =>
+          l.includes('trigger') &&
+          l.includes('my-event') &&
+          l.includes('public-test'),
+      ),
+    ).toBe(true)
   })
 
   it('routes batch events through the logger', async () => {
@@ -87,14 +97,31 @@ describe('SocketoServer logging', () => {
     })
 
     const app = server.createApp()
-    const res = await app.request(`/apps/local/batch_events?${queryParams.toString()}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-    })
+    const res = await app.request(
+      `/apps/local/batch_events?${queryParams.toString()}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      },
+    )
 
     expect(res.status).toBe(200)
-    expect(logs.some((l) => l.includes('batch') && l.includes('batch-event-1') && l.includes('chan-1'))).toBe(true)
-    expect(logs.some((l) => l.includes('batch') && l.includes('batch-event-2') && l.includes('chan-2'))).toBe(true)
+    expect(
+      logs.some(
+        (l) =>
+          l.includes('batch') &&
+          l.includes('batch-event-1') &&
+          l.includes('chan-1'),
+      ),
+    ).toBe(true)
+    expect(
+      logs.some(
+        (l) =>
+          l.includes('batch') &&
+          l.includes('batch-event-2') &&
+          l.includes('chan-2'),
+      ),
+    ).toBe(true)
   })
 })

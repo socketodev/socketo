@@ -77,4 +77,3 @@ export function createErrorMessage(
   if (channel) outgoing.channel = channel
   return outgoing
 }
-

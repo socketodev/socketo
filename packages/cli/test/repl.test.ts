@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test'
 import { COMMANDS } from '../src/repl.js'
-import { SocketoServer } from '../src/worker.js'
 
 describe('REPL Commands', () => {
   it('defines all required interactive slash commands', () => {

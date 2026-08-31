@@ -338,13 +338,18 @@ export class SocketoServer {
       }
 
       const result = await this.namespace.triggerBatch({
-        batch: batch.map((item) => ({
-          name: item.name!,
-          channel: item.channel!,
-          data: item.data ?? {},
-          socket_id: item.socket_id,
-          info: item.info,
-        })),
+        batch: batch
+          .filter(
+            (item): item is typeof item & { name: string; channel: string } =>
+              Boolean(item.name && item.channel),
+          )
+          .map((item) => ({
+            name: item.name,
+            channel: item.channel,
+            data: item.data ?? {},
+            socket_id: item.socket_id,
+            info: item.info,
+          })),
       })
 
       if (this.verbose) {
