@@ -15,6 +15,7 @@ import type {
   ChannelAttributes,
   ChannelOccupancy,
   ChannelQueryResponse,
+  ChannelsQueryResponse,
   EventPayload,
   JsonValue,
   PresenceData,
@@ -390,9 +391,10 @@ export class RealtimeNamespace {
     }))
   }
 
-  public queryChannels(options?: { filterByPrefix?: string; info?: string }): {
-    channels: Record<string, ChannelAttributes>
-  } {
+  public queryChannels(options?: {
+    filterByPrefix?: string
+    info?: string
+  }): ChannelsQueryResponse {
     const requestedAttrs = options?.info
       ? options.info.split(',').map((s) => s.trim())
       : []
@@ -417,7 +419,7 @@ export class RealtimeNamespace {
       result[channel] = attrs
     }
 
-    return { channels: result }
+    return { channels: result } satisfies ChannelsQueryResponse
   }
 
   public queryChannel(

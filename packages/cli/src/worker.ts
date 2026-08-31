@@ -5,6 +5,7 @@ import {
   type AppPolicy,
   generateSocketId,
   invalidInfoAttribute,
+  isStringValue,
   type JsonValue,
   type RealtimeConnection,
   type RealtimeHooks,
@@ -36,6 +37,11 @@ type HonoEnv = {
   Variables: {
     parsedBody: unknown
   }
+}
+
+interface AuthResponseBody {
+  auth: string
+  channel_data?: string
 }
 
 interface AuthRequestBody {
@@ -222,6 +228,7 @@ export class SocketoServer {
 
     // Auth endpoint for private/presence channels
     app.post('/apps/:id/auth', (c) => {
+      // SAFETY: parsedBody is populated by body parsing middleware and validated structurally below.
       const body = (c.get('parsedBody') ?? {}) as AuthRequestBody
       const { socket_id, channel_name, channel_data } = body
 
@@ -239,7 +246,7 @@ export class SocketoServer {
 
       const auth = `${appKey}:${signature}`
 
-      const res: { auth: string; channel_data?: string } = { auth }
+      const res: AuthResponseBody = { auth }
       if (channel_data !== undefined) res.channel_data = channel_data
 
       return c.json(res)
@@ -247,6 +254,7 @@ export class SocketoServer {
 
     // Single / Multi-channel Events Trigger
     app.post('/apps/:id/events', async (c) => {
+      // SAFETY: parsedBody is populated by body parsing middleware and validated structurally below.
       const body = (c.get('parsedBody') ?? {}) as TriggerRequestBody
       const { name, channels, channel, data, socket_id, info } = body
 
@@ -296,6 +304,7 @@ export class SocketoServer {
 
     // Batch Events Trigger
     app.post('/apps/:id/batch_events', async (c) => {
+      // SAFETY: parsedBody is populated by body parsing middleware and validated structurally below.
       const body = (c.get('parsedBody') ?? {}) as BatchRequestBody
       const batch = body.batch
 
@@ -518,10 +527,9 @@ export class SocketoServer {
 
         ws.on('message', (rawData: string | Buffer) => {
           this.startActivityTimer(socketId, ws)
-          const text =
-            typeof rawData === 'string'
-              ? rawData
-              : Buffer.from(rawData).toString()
+          const text = isStringValue(rawData)
+            ? rawData
+            : Buffer.from(rawData).toString()
           void this.namespace.receive(socketId, text).catch(() => undefined)
         })
 

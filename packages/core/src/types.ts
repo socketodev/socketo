@@ -95,6 +95,10 @@ export type ChannelAttributes = {
   user_count?: number
 }
 
+export type ChannelsQueryResponse = {
+  channels: Record<string, ChannelAttributes>
+}
+
 export type ChannelQueryResponse = {
   occupied: boolean
   subscription_count?: number

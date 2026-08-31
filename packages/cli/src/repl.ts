@@ -90,6 +90,7 @@ ${PRIMARY_BOLD}Interactive Commands (Type / to filter, Tab to complete):${RESET}
 function parseData(raw: string | undefined): JsonValue {
   if (!raw) return {}
   try {
+    // SAFETY: JSON.parse on arbitrary string parses valid JSON conforming to JsonValue.
     return JSON.parse(raw) as JsonValue
   } catch {
     return raw
@@ -232,9 +233,17 @@ export function startInteractiveRepl(
     }
   }
 
+  interface ReadlineInternal extends readline.Interface {
+    line?: string
+    closed?: boolean
+    prevRows?: number
+  }
+
   const renderGhost = () => {
     if (!process.stdout.isTTY) return
-    const currentLine = (rl as unknown as { line?: string }).line
+    // SAFETY: node readline internal instance exposes current input buffer on the line property.
+    const internalRl = rl as ReadlineInternal
+    const currentLine = internalRl.line
     if (!currentLine) {
       clearGhost()
       return
@@ -262,9 +271,11 @@ export function startInteractiveRepl(
     writer: (...args: unknown[]) => void,
     ...args: unknown[]
   ) => {
-    const isClosed = (rl as unknown as { closed?: boolean }).closed
+    // SAFETY: node readline internal instance exposes closed flag and cursor tracking.
+    const internalRl = rl as ReadlineInternal
+    const isClosed = internalRl.closed
     if (process.stdout.isTTY && !isExecutingCommand && !isClosed) {
-      const prevRows = (rl as unknown as { prevRows?: number }).prevRows || 0
+      const prevRows = internalRl.prevRows || 0
       if (prevRows > 0) {
         readline.moveCursor(process.stdout, 0, -prevRows)
       }

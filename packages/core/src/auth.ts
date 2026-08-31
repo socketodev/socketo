@@ -1,5 +1,12 @@
-import { createHash, createHmac } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { AppPolicy } from './types'
+
+export function safeTimingEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a)
+  const bufB = Buffer.from(b)
+  if (bufA.byteLength !== bufB.byteLength) return false
+  return timingSafeEqual(bufA, bufB)
+}
 
 export function verifyChannelAuth(
   socketId: string,
@@ -13,7 +20,7 @@ export function verifyChannelAuth(
       ? `${socketId}:${channel}:${channelData}`
       : `${socketId}:${channel}`
   const expected = `${policy.key}:${hmacHex(policy.secret, signedData)}`
-  return auth === expected
+  return safeTimingEqual(auth, expected)
 }
 
 export function verifySigninAuth(
@@ -24,7 +31,7 @@ export function verifySigninAuth(
 ): boolean {
   const signedData = `${socketId}::user::${userData}`
   const expected = `${policy.key}:${hmacHex(policy.secret, signedData)}`
-  return auth === expected
+  return safeTimingEqual(auth, expected)
 }
 
 export function verifyRestAuth(options: {
@@ -75,17 +82,18 @@ export function verifyRestAuth(options: {
   ) {
     const bodyMd5 = query.get('body_md5')
     const expectedMd5 = createHash('md5').update(body).digest('hex')
-    if (!bodyMd5 || bodyMd5 !== expectedMd5) return false
+    if (!bodyMd5 || !safeTimingEqual(bodyMd5, expectedMd5)) return false
   }
 
   const queryEntries = [...query.entries()]
-    .filter(([key]) => key !== 'auth_signature')
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, val]) => `${key.toLowerCase()}=${val}`)
+    .filter(([key]) => key.toLowerCase() !== 'auth_signature')
+    .map(([key, val]) => [key.toLowerCase(), val])
+    .sort(([a], [b]) => (a[0] ?? '').localeCompare(b[0] ?? ''))
+    .map(([key, val]) => `${key}=${val}`)
     .join('&')
 
   const stringToSign = `${method.toUpperCase()}\n${path}\n${queryEntries}`
-  return authSignature === hmacHex(appSecret, stringToSign)
+  return safeTimingEqual(authSignature, hmacHex(appSecret, stringToSign))
 }
 
 export interface SignedRestRequest {
@@ -110,7 +118,7 @@ export function signRestRequest(options: {
 
   if (options.query) {
     for (const [k, v] of Object.entries(options.query)) {
-      entries.push([k, v])
+      entries.push([k.toLowerCase(), v])
     }
   }
 
@@ -122,9 +130,7 @@ export function signRestRequest(options: {
   }
 
   entries.sort(([a], [b]) => a.localeCompare(b))
-  const queryString = entries
-    .map(([k, v]) => `${k.toLowerCase()}=${v}`)
-    .join('&')
+  const queryString = entries.map(([k, v]) => `${k}=${v}`).join('&')
   const stringToSign = `${method.toUpperCase()}\n${path}\n${queryString}`
   const signature = hmacHex(appSecret, stringToSign)
 

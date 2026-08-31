@@ -2,13 +2,48 @@
 
 import { parseArgs } from 'node:util'
 import type { JsonValue } from '@socketo/core'
-import { signRestRequest } from '@socketo/core'
+import { isStringValue, signRestRequest } from '@socketo/core'
 import { startInteractiveRepl } from './repl.js'
 import { SocketoServer } from './worker.js'
 
 const DEFAULT_PORT = 8787
 const DEFAULT_HOST = 'localhost'
 const DEFAULT_APP_KEY = 'local'
+
+interface AuthResponse {
+  auth: string
+}
+
+interface ChannelsInfoResponse {
+  channels: Record<string, { subscription_count?: number }>
+}
+
+interface TriggerRequestBody {
+  name: string
+  channel: string
+  data: JsonValue
+  socket_id?: string
+}
+
+interface SubscribePayload {
+  channel: string
+  auth?: string
+  channel_data?: string
+}
+
+interface ChannelAuthRequestBody {
+  socket_id: string
+  channel_name: string
+  channel_data?: string
+}
+
+interface ConnectionData {
+  socket_id: string
+}
+
+interface PresenceDataPayload {
+  presence?: { count: number; ids: string[] }
+}
 
 function showHelp() {
   console.log(`
@@ -42,6 +77,7 @@ Options:
 function parseTriggerData(value: string | undefined): JsonValue {
   if (!value) return {}
   try {
+    // SAFETY: JSON.parse on CLI argument parses JSON conforming to JsonValue.
     return JSON.parse(value) as JsonValue
   } catch {
     console.warn(
@@ -136,6 +172,7 @@ async function cmdSubscribe(
 
   ws.addEventListener('message', async (event) => {
     try {
+      // SAFETY: Pusher WebSocket incoming protocol frame format.
       const msg = JSON.parse(String(event.data)) as {
         event: string
         channel?: string
@@ -145,10 +182,10 @@ async function cmdSubscribe(
       const timeStr = new Date().toLocaleTimeString()
 
       if (msg.event === 'pusher:connection_established') {
-        const connData =
-          typeof msg.data === 'string'
-            ? (JSON.parse(msg.data) as { socket_id: string })
-            : (msg.data as { socket_id: string })
+        // SAFETY: pusher:connection_established data payload conforms to ConnectionData format.
+        const connData = (
+          isStringValue(msg.data) ? JSON.parse(msg.data) : msg.data
+        ) as ConnectionData
         const socketId = connData.socket_id
 
         const channelData =
@@ -159,18 +196,13 @@ async function cmdSubscribe(
               })
             : undefined
 
-        const subscribePayload: {
-          channel: string
-          auth?: string
-          channel_data?: string
-        } = { channel }
+        const subscribePayload: SubscribePayload = { channel }
 
         if (channel.startsWith('private-') || channel.startsWith('presence-')) {
-          const authBody: {
-            socket_id: string
-            channel_name: string
-            channel_data?: string
-          } = { socket_id: socketId, channel_name: channel }
+          const authBody: ChannelAuthRequestBody = {
+            socket_id: socketId,
+            channel_name: channel,
+          }
           if (channelData) authBody.channel_data = channelData
 
           const res = await restRequest(
@@ -189,7 +221,8 @@ async function cmdSubscribe(
             ws.close()
             process.exit(1)
           }
-          const authRes = (await res.json()) as { auth: string }
+          // SAFETY: /apps/:id/auth endpoint returns AuthResponse on success.
+          const authRes = (await res.json()) as AuthResponse
           subscribePayload.auth = authRes.auth
         }
 
@@ -207,12 +240,10 @@ async function cmdSubscribe(
       }
 
       if (msg.event === 'pusher_internal:subscription_succeeded') {
-        const rawData =
-          typeof msg.data === 'string'
-            ? (JSON.parse(msg.data) as {
-                presence?: { count: number; ids: string[] }
-              })
-            : (msg.data as { presence?: { count: number; ids: string[] } })
+        // SAFETY: subscription_succeeded data payload conforms to PresenceDataPayload structure.
+        const rawData = (
+          isStringValue(msg.data) ? JSON.parse(msg.data) : msg.data
+        ) as PresenceDataPayload
         if (rawData?.presence) {
           console.log(
             `  Presence: ${rawData.presence.count} member(s), IDs: ${rawData.presence.ids.join(', ')}`,
@@ -223,8 +254,9 @@ async function cmdSubscribe(
 
       if (msg.event === 'pusher:pong') return
 
-      const dataStr =
-        typeof msg.data === 'string' ? msg.data : JSON.stringify(msg.data ?? {})
+      const dataStr = isStringValue(msg.data)
+        ? msg.data
+        : JSON.stringify(msg.data ?? {})
       const userStr = msg.user_id ? ` [user: ${msg.user_id}]` : ''
       const chStr =
         msg.channel && msg.channel !== channel ? ` (${msg.channel})` : ''
@@ -267,12 +299,7 @@ async function cmdTrigger(
 
   const httpHost = host === '0.0.0.0' ? 'localhost' : host
   const data = parseTriggerData(rawData)
-  const body: {
-    name: string
-    channel: string
-    data: JsonValue
-    socket_id?: string
-  } = { name: eventName, channel, data }
+  const body: TriggerRequestBody = { name: eventName, channel, data }
   if (socketId) body.socket_id = socketId
 
   const res = await restRequest(
@@ -320,9 +347,8 @@ async function cmdInfo(
       process.exit(1)
     }
 
-    const body = (await res.json()) as {
-      channels: Record<string, { subscription_count?: number }>
-    }
+    // SAFETY: Channels query response returns ChannelsInfoResponse JSON structure.
+    const body = (await res.json()) as ChannelsInfoResponse
     const channels = Object.keys(body.channels || {})
 
     console.log(`
@@ -411,22 +437,27 @@ const parsed = parseArgs({
 })
 
 const rawCommand = parsed.positionals[0]
-const host = (parsed.values.host as string) || DEFAULT_HOST
-const port = parsed.values.port
-  ? parseInt(parsed.values.port as string, 10)
+const host = isStringValue(parsed.values.host)
+  ? parsed.values.host
+  : DEFAULT_HOST
+const port = isStringValue(parsed.values.port)
+  ? parseInt(parsed.values.port, 10)
   : DEFAULT_PORT
-const appKey =
-  (parsed.values['app-key'] as string) ||
-  process.env.SOCKETO_APP_KEY ||
-  DEFAULT_APP_KEY
-const appId =
-  (parsed.values['app-id'] as string) || process.env.SOCKETO_APP_ID || appKey
-const appSecret =
-  (parsed.values['app-secret'] as string) ||
-  process.env.SOCKETO_APP_SECRET ||
-  appKey
-const socketId = parsed.values['socket-id'] as string | undefined
-const userId = (parsed.values['user-id'] as string) || 'user-1'
+const appKey = isStringValue(parsed.values['app-key'])
+  ? parsed.values['app-key']
+  : process.env.SOCKETO_APP_KEY || DEFAULT_APP_KEY
+const appId = isStringValue(parsed.values['app-id'])
+  ? parsed.values['app-id']
+  : process.env.SOCKETO_APP_ID || appKey
+const appSecret = isStringValue(parsed.values['app-secret'])
+  ? parsed.values['app-secret']
+  : process.env.SOCKETO_APP_SECRET || appKey
+const socketId = isStringValue(parsed.values['socket-id'])
+  ? parsed.values['socket-id']
+  : undefined
+const userId = isStringValue(parsed.values['user-id'])
+  ? parsed.values['user-id']
+  : 'user-1'
 const isPresence = parsed.values.presence === true
 const verbose = parsed.values.verbose === true
 

@@ -1,4 +1,5 @@
 export {
+  safeTimingEqual,
   signRestRequest,
   verifyChannelAuth,
   verifyRestAuth,
@@ -23,6 +24,7 @@ export type {
   ChannelAttributes,
   ChannelOccupancy,
   ChannelQueryResponse,
+  ChannelsQueryResponse,
   EventPayload,
   JsonObject,
   JsonPrimitive,
