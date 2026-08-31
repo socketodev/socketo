@@ -27,8 +27,14 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
     return c.json({ status: false, errors: parsed.error.issues }, 400)
   }
 
-  const { secret } = c.get('app')
+  const { key, secret } = c.get('app')
   const { auth_signature, ...rest } = parsed.data
+
+  if (rest.auth_key !== key) {
+    throw new HTTPException(401, {
+      message: 'Invalid auth_key for this app',
+    })
+  }
 
   if (rest.auth_version !== '1.0') {
     throw new HTTPException(401, {

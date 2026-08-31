@@ -1,13 +1,15 @@
 import { isStringValue, type JsonObject, type JsonValue } from '@socketo/core'
 import type { Context } from 'hono'
+import type { App } from './database/types'
 import type { ServerDO } from './durable-objects/server'
 
 export type HonoContext = Context & {
   Bindings: Env
   Variables: {
     app: {
-      stub: DurableObjectStub<ServerDO>
+      key: string
       secret: string
+      stub: DurableObjectStub<ServerDO>
     }
   }
 }

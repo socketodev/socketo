@@ -1,4 +1,8 @@
-import { generateSocketId, type RealtimeConnection } from '@socketo/core'
+import {
+  generateSocketId,
+  type RealtimeConnection,
+  type SessionSnapshot,
+} from '@socketo/core'
 import { type AttachmentData, isAttachmentData } from '@/types'
 
 const MAX_ATTACHMENT_BYTES = 16_384
