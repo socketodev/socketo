@@ -397,7 +397,10 @@ export class SocketoServer {
       if (invalidAttr) {
         return c.json({ error: `Invalid info attribute: ${invalidAttr}` }, 400)
       }
-      if (infoAttrs.includes('user_count') && !channel.startsWith('presence-')) {
+      if (
+        infoAttrs.includes('user_count') &&
+        !channel.startsWith('presence-')
+      ) {
         return c.json(
           { error: 'user_count is only available for presence channels' },
           400,
