@@ -217,6 +217,8 @@ function completer(line: string): [string[], string] {
 export function startInteractiveRepl(
   server: SocketoServer,
 ): readline.Interface {
+  let isExecutingCommand = false
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -224,15 +226,79 @@ export function startInteractiveRepl(
     completer,
   })
 
+  const clearGhost = () => {
+    if (process.stdout.isTTY) {
+      process.stdout.write('\x1b[s\x1b[K\x1b[u')
+    }
+  }
+
+  const renderGhost = () => {
+    if (!process.stdout.isTTY) return
+    const currentLine = (rl as unknown as { line?: string }).line
+    if (!currentLine) {
+      clearGhost()
+      return
+    }
+
+    const trimmed = currentLine.trim()
+    if (trimmed.startsWith('/')) {
+      const match = COMMANDS.find((c) => c.name.startsWith(trimmed))
+
+      if (match?.name.startsWith(trimmed)) {
+        const suffix = match.name.slice(trimmed.length)
+        if (suffix.length > 0) {
+          // Draw ghost suggestion in dim primary color and restore cursor
+          process.stdout.write(
+            `\x1b[s\x1b[K${DIM}${PRIMARY}${suffix}${RESET}\x1b[u`,
+          )
+          return
+        }
+      }
+    }
+    clearGhost()
+  }
+
+  const writeAbovePrompt = (
+    writer: (...args: unknown[]) => void,
+    ...args: unknown[]
+  ) => {
+    const isClosed = (rl as unknown as { closed?: boolean }).closed
+    if (process.stdout.isTTY && !isExecutingCommand && !isClosed) {
+      const prevRows = (rl as unknown as { prevRows?: number }).prevRows || 0
+      if (prevRows > 0) {
+        readline.moveCursor(process.stdout, 0, -prevRows)
+      }
+      readline.cursorTo(process.stdout, 0)
+      readline.clearScreenDown(process.stdout)
+      writer(...args)
+      rl.prompt(true)
+      renderGhost()
+    } else {
+      writer(...args)
+    }
+  }
+
+  const origLog = console.log
+  const origWarn = console.warn
+  const origError = console.error
+
+  console.log = (...args: unknown[]) => writeAbovePrompt(origLog, ...args)
+  console.warn = (...args: unknown[]) => writeAbovePrompt(origWarn, ...args)
+  console.error = (...args: unknown[]) => writeAbovePrompt(origError, ...args)
+
+  const restoreConsole = () => {
+    console.log = origLog
+    console.warn = origWarn
+    console.error = origError
+  }
+
+  server.setLogger((...args: unknown[]) => writeAbovePrompt(origLog, ...args))
+
   rl.prompt()
 
   // Listen to keypress to display clean inline ghost text suggestion
   if (process.stdin.isTTY) {
     readline.emitKeypressEvents(process.stdin)
-
-    const clearGhost = () => {
-      process.stdout.write('\x1b[s\x1b[K\x1b[u')
-    }
 
     process.stdin.on('keypress', (_str, key) => {
       if (key && (key.name === 'return' || key.name === 'enter')) {
@@ -241,110 +307,94 @@ export function startInteractiveRepl(
       }
 
       setImmediate(() => {
-        const currentLine = (rl as unknown as { line: string }).line
-        if (!currentLine) {
-          clearGhost()
-          return
-        }
-
-        const trimmed = currentLine.trim()
-        if (trimmed.startsWith('/')) {
-          const match = COMMANDS.find((c) => c.name.startsWith(trimmed))
-
-          if (match?.name.startsWith(trimmed)) {
-            const suffix = match.name.slice(trimmed.length)
-            if (suffix.length > 0) {
-              // Draw ghost suggestion in dim primary color and restore cursor
-              process.stdout.write(
-                `\x1b[s\x1b[K${DIM}${PRIMARY}${suffix}${RESET}\x1b[u`,
-              )
-              return
-            }
-          }
-        }
-        clearGhost()
+        renderGhost()
       })
     })
   }
 
   rl.on('line', async (line) => {
-    // If in interactive TTY, cleanly erase any ghost text on the line above
-    if (process.stdout.isTTY) {
-      const col = 10 + line.length + 1
-      process.stdout.write(`\x1b[1A\x1b[${col}G\x1b[K\x1b[1B\r`)
-    }
-
-    const trimmed = line.trim()
-    if (!trimmed) {
-      rl.prompt()
-      return
-    }
-
-    const parts = trimmed.startsWith('/')
-      ? trimmed.slice(1).split(/\s+/)
-      : trimmed.split(/\s+/)
-    const cmd = parts[0]?.toLowerCase()
-    const args = parts.slice(1)
-
-    switch (cmd) {
-      case 'help':
-      case 'h':
-      case '?':
-        printHelp()
-        break
-      case 'trigger':
-      case 't':
-      case 'event':
-        await handleTrigger(server, args)
-        break
-      case 'channels':
-      case 'c':
-      case 'list':
-        handleChannels(server)
-        break
-      case 'presence':
-      case 'p':
-        handlePresence(server, args[0])
-        break
-      case 'sockets':
-      case 's':
-        handleSockets(server)
-        break
-      case 'terminate':
-      case 'kick':
-        await handleTerminate(server, args[0])
-        break
-      case 'verbose':
-      case 'v': {
-        const isV = server.toggleVerbose()
-        console.log(
-          `${PRIMARY}ℹ Verbose payload logging is now ${isV ? `${GREEN}enabled${RESET}` : `${YELLOW}disabled${RESET}`}${RESET}`,
-        )
-        break
+    isExecutingCommand = true
+    try {
+      // If in interactive TTY, cleanly erase any ghost text on the line above
+      if (process.stdout.isTTY) {
+        const col = 10 + line.length + 1
+        process.stdout.write(`\x1b[1A\x1b[${col}G\x1b[K\x1b[1B\r`)
       }
-      case 'clear':
-      case 'cls':
-        console.clear()
-        server.printBanner()
-        break
-      case 'quit':
-      case 'q':
-      case 'exit':
-        console.log(`${DIM}Shutting down server...${RESET}`)
-        await server.close()
-        process.exit(0)
-        break
-      default:
-        console.log(
-          `${RED}Unknown command '${trimmed}'. Type /help for available commands.${RESET}`,
-        )
-        break
-    }
 
-    rl.prompt()
+      const trimmed = line.trim()
+      if (!trimmed) {
+        return
+      }
+
+      const parts = trimmed.startsWith('/')
+        ? trimmed.slice(1).split(/\s+/)
+        : trimmed.split(/\s+/)
+      const cmd = parts[0]?.toLowerCase()
+      const args = parts.slice(1)
+
+      switch (cmd) {
+        case 'help':
+        case 'h':
+        case '?':
+          printHelp()
+          break
+        case 'trigger':
+        case 't':
+        case 'event':
+          await handleTrigger(server, args)
+          break
+        case 'channels':
+        case 'c':
+        case 'list':
+          handleChannels(server)
+          break
+        case 'presence':
+        case 'p':
+          handlePresence(server, args[0])
+          break
+        case 'sockets':
+        case 's':
+          handleSockets(server)
+          break
+        case 'terminate':
+        case 'kick':
+          await handleTerminate(server, args[0])
+          break
+        case 'verbose':
+        case 'v': {
+          const isV = server.toggleVerbose()
+          console.log(
+            `${PRIMARY}ℹ Verbose payload logging is now ${isV ? `${GREEN}enabled${RESET}` : `${YELLOW}disabled${RESET}`}${RESET}`,
+          )
+          break
+        }
+        case 'clear':
+        case 'cls':
+          console.clear()
+          server.printBanner()
+          break
+        case 'quit':
+        case 'q':
+        case 'exit':
+          console.log(`${DIM}Shutting down server...${RESET}`)
+          restoreConsole()
+          await server.close()
+          process.exit(0)
+          break
+        default:
+          console.log(
+            `${RED}Unknown command '${trimmed}'. Type /help for available commands.${RESET}`,
+          )
+          break
+      }
+    } finally {
+      isExecutingCommand = false
+      rl.prompt()
+    }
   })
 
   rl.on('close', async () => {
+    restoreConsole()
     await server.close()
     process.exit(0)
   })

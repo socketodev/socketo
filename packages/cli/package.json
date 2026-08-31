@@ -29,6 +29,7 @@
   ],
   "scripts": {
     "build": "rolldown -c",
+    "test": "bun test",
     "start": "bun run dist/index.js start",
     "prepublishOnly": "bun run build"
   },

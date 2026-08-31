@@ -20,6 +20,8 @@ const BATCH_LIMIT = 10
 type WsSocket = import('ws').WebSocket
 type WsServer = import('ws').WebSocketServer
 
+export type Logger = (...args: unknown[]) => void
+
 export interface ServerOptions {
   port?: number
   host?: string
@@ -27,6 +29,7 @@ export interface ServerOptions {
   appKey?: string
   appSecret?: string
   verbose?: boolean
+  logger?: Logger
 }
 
 type HonoEnv = {
@@ -100,6 +103,7 @@ export class SocketoServer {
   public readonly appKey: string
   public readonly appSecret: string
   public verbose: boolean
+  public logger: Logger
   private readonly namespace: RealtimeNamespace
   private readonly timers = new Map<
     string,
@@ -122,6 +126,7 @@ export class SocketoServer {
     this.appId = options.appId || this.appKey
     this.appSecret = options.appSecret || this.appKey
     this.verbose = options.verbose ?? false
+    this.logger = options.logger ?? console.log
 
     const policy: AppPolicy = {
       key: this.appKey,
@@ -132,31 +137,37 @@ export class SocketoServer {
     const hooks: RealtimeHooks = {
       onClientEvent: (event) => {
         if (this.verbose) {
-          console.log(
+          this.log(
             `[${ts()}] client-event ${event.event} on ${event.channel}`,
             event.data ?? '',
           )
         } else {
-          console.log(
-            `[${ts()}] client-event ${event.event} on ${event.channel}`,
-          )
+          this.log(`[${ts()}] client-event ${event.event} on ${event.channel}`)
         }
       },
       onMemberAdded: (channel, userId) => {
-        console.log(`[${ts()}] member+     ${userId} → ${channel}`)
+        this.log(`[${ts()}] member+     ${userId} → ${channel}`)
       },
       onMemberRemoved: (channel, userId) => {
-        console.log(`[${ts()}] member-     ${userId} ← ${channel}`)
+        this.log(`[${ts()}] member-     ${userId} ← ${channel}`)
       },
       onChannelOccupied: (channel) => {
-        console.log(`[${ts()}] occupied    ${channel}`)
+        this.log(`[${ts()}] occupied    ${channel}`)
       },
       onChannelVacated: (channel) => {
-        console.log(`[${ts()}] vacated     ${channel}`)
+        this.log(`[${ts()}] vacated     ${channel}`)
       },
     }
 
     this.namespace = new RealtimeNamespace(policy, hooks)
+  }
+
+  public log(...args: unknown[]): void {
+    this.logger(...args)
+  }
+
+  public setLogger(logger: Logger): void {
+    this.logger = logger
   }
 
   createApp(): Hono<HonoEnv> {
@@ -268,12 +279,12 @@ export class SocketoServer {
       })
 
       if (this.verbose) {
-        console.log(
+        this.log(
           `[${ts()}] trigger    ${name} → ${chanList.join(', ')}`,
           data ?? '',
         )
       } else {
-        console.log(`[${ts()}] trigger    ${name} → ${chanList.join(', ')}`)
+        this.log(`[${ts()}] trigger    ${name} → ${chanList.join(', ')}`)
       }
 
       if (result.channels) {
@@ -338,14 +349,14 @@ export class SocketoServer {
 
       if (this.verbose) {
         for (const event of batch) {
-          console.log(
+          this.log(
             `[${ts()}] batch      ${event.name} → ${event.channel}`,
             event.data ?? '',
           )
         }
       } else {
         for (const event of batch) {
-          console.log(`[${ts()}] batch      ${event.name} → ${event.channel}`)
+          this.log(`[${ts()}] batch      ${event.name} → ${event.channel}`)
         }
       }
 
@@ -497,7 +508,7 @@ export class SocketoServer {
         )
 
         if (this.verbose) {
-          console.log(`[${ts()}] connect    ${socketId}`)
+          this.log(`[${ts()}] connect    ${socketId}`)
         }
 
         ws.on('message', (rawData: string | Buffer) => {
@@ -514,7 +525,7 @@ export class SocketoServer {
           this.clearTimers(socketId)
           this.namespace.disconnect(socketId)
           if (this.verbose) {
-            console.log(`[${ts()}] disconnect ${socketId}`)
+            this.log(`[${ts()}] disconnect ${socketId}`)
           }
         })
       })
