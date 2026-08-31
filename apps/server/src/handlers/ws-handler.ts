@@ -130,47 +130,29 @@ export class WebSocketHandler {
     }
   }
 
-  public async broadcast(payload: Event | BatchEvent) {
+  public async trigger(payload: Event) {
     const namespace = await this.getNamespace()
-
-    if ('batch' in payload) {
-      for (const item of payload.batch) {
-        await namespace.broadcast({
-          channel: item.channel,
-          event: item.name,
-          data: item.data,
-          exceptId: item.socket_id,
-        })
-      }
-      return
-    }
-
-    const channels =
-      payload.channels ?? (payload.channel ? [payload.channel] : [])
-    for (const channel of channels) {
-      await namespace.broadcast({
-        channel,
-        event: payload.name,
-        data: payload.data,
-        exceptId: payload.socket_id,
-      })
-    }
+    return namespace.trigger(payload)
   }
 
-  public async getChannels() {
-    return (await this.getNamespace()).getChannels()
+  public async triggerBatch(payload: BatchEvent) {
+    const namespace = await this.getNamespace()
+    return namespace.triggerBatch(payload)
   }
 
-  public async getChannelsWithInfo() {
-    return (await this.getNamespace()).getChannelsWithInfo()
+  public async queryChannels(options?: {
+    filterByPrefix?: string
+    info?: string
+  }) {
+    return (await this.getNamespace()).queryChannels(options)
   }
 
-  public async getChannel(channel: string) {
-    return (await this.getNamespace()).getChannel(channel)
+  public async queryChannel(channel: string, options?: { info?: string }) {
+    return (await this.getNamespace()).queryChannel(channel, options)
   }
 
-  public async getChannelUsers(channel: string) {
-    return (await this.getNamespace()).getChannelUsers(channel)
+  public async queryChannelUsers(channel: string) {
+    return (await this.getNamespace()).queryChannelUsers(channel)
   }
 
   public async terminateUserConnections(userId: string) {

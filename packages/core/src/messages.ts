@@ -51,3 +51,30 @@ export function parsePresenceMember(
   const userInfo = isRecord(data.user_info) ? data.user_info : {}
   return { userId: String(data.user_id), userInfo }
 }
+
+export function createHandshakeMessage(
+  socketId: string,
+  activityTimeout = 120,
+): OutgoingMessage {
+  return {
+    event: 'pusher:connection_established',
+    data: {
+      socket_id: socketId,
+      activity_timeout: activityTimeout,
+    },
+  }
+}
+
+export function createErrorMessage(
+  code: number,
+  message: string,
+  channel?: string,
+): OutgoingMessage {
+  const outgoing: OutgoingMessage = {
+    event: 'pusher:error',
+    data: { code, message },
+  }
+  if (channel) outgoing.channel = channel
+  return outgoing
+}
+

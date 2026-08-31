@@ -1,5 +1,9 @@
 import { DurableObject } from 'cloudflare:workers'
-import { serializeMessage } from '@socketo/core'
+import {
+  createErrorMessage,
+  createHandshakeMessage,
+  serializeMessage,
+} from '@socketo/core'
 import type { BatchEvent, Event } from '@/api/schemas/apps'
 import { AppHandler } from '@/handlers/app-handler'
 import { WebSocketHandler } from '@/handlers/ws-handler'
@@ -31,24 +35,24 @@ export class ServerDO extends DurableObject<Env> {
     console.error('WebSocket Error:', attachment?.id, error)
   }
 
-  public broadcast(payload: Event | BatchEvent) {
-    return this.ws.broadcast(payload)
+  public trigger(payload: Event) {
+    return this.ws.trigger(payload)
   }
 
-  public getChannels() {
-    return this.ws.getChannels()
+  public triggerBatch(payload: BatchEvent) {
+    return this.ws.triggerBatch(payload)
   }
 
-  public getChannelsWithInfo() {
-    return this.ws.getChannelsWithInfo()
+  public queryChannels(options?: { filterByPrefix?: string; info?: string }) {
+    return this.ws.queryChannels(options)
   }
 
-  public getChannel(channelName: string) {
-    return this.ws.getChannel(channelName)
+  public queryChannel(channelName: string, options?: { info?: string }) {
+    return this.ws.queryChannel(channelName, options)
   }
 
-  public getChannelUsers(channelName: string) {
-    return this.ws.getChannelUsers(channelName)
+  public queryChannelUsers(channelName: string) {
+    return this.ws.queryChannelUsers(channelName)
   }
 
   public async terminateUserConnections(userId: string) {
@@ -86,13 +90,7 @@ export class ServerDO extends DurableObject<Env> {
 
     this.connections.sendTo(
       server,
-      serializeMessage({
-        event: 'pusher:connection_established',
-        data: {
-          socket_id: socketId,
-          activity_timeout: 120,
-        },
-      }),
+      serializeMessage(createHandshakeMessage(socketId, 120)),
     )
 
     return new Response(null, { status: 101, webSocket: client })
@@ -102,7 +100,7 @@ export class ServerDO extends DurableObject<Env> {
     const { client, server } = this.connections.upgrade()
     this.connections.sendTo(
       server,
-      serializeMessage({ event: 'pusher:error', data: { code, message } }),
+      serializeMessage(createErrorMessage(code, message)),
     )
     server.close(code, message)
     return new Response(null, { status: 101, webSocket: client })

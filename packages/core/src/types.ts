@@ -70,3 +70,42 @@ export type RealtimeMessageGuardResult = {
   code: number
   message: string
 }
+
+export type EventPayload = {
+  name: string
+  data: JsonValue
+  channel?: string
+  channels?: string[]
+  socket_id?: string
+  info?: string
+}
+
+export type BatchEventPayload = {
+  batch: Array<{
+    name: string
+    channel: string
+    data: JsonValue
+    socket_id?: string
+    info?: string
+  }>
+}
+
+export type ChannelAttributes = {
+  subscription_count?: number
+  user_count?: number
+}
+
+export type ChannelQueryResponse = {
+  occupied: boolean
+  subscription_count?: number
+  user_count?: number
+}
+
+export type TriggerResult = {
+  recipientCount: number
+  channels?: Record<string, Record<string, number>>
+}
+
+export type BatchTriggerResult = {
+  batch: Array<Record<string, number>>
+}

@@ -360,6 +360,116 @@ describe('RealtimeNamespace', () => {
       },
     })
   })
+
+  test('trigger broadcasts across multiple channels and enriches info attributes', async () => {
+    const namespace = new RealtimeNamespace(policy)
+    const first = new TestConnection('socket-1')
+    const second = new TestConnection('socket-2')
+    namespace.connect(first)
+    namespace.connect(second)
+
+    await namespace.receive(
+      first.id,
+      JSON.stringify({
+        event: 'pusher:subscribe',
+        data: { channel: 'orders' },
+      }),
+    )
+    await namespace.receive(
+      second.id,
+      JSON.stringify({
+        event: 'pusher:subscribe',
+        data: { channel: 'notifications' },
+      }),
+    )
+
+    const result = await namespace.trigger({
+      name: 'item-created',
+      data: { id: 123 },
+      channels: ['orders', 'notifications'],
+      info: 'subscription_count',
+    })
+
+    expect(result.recipientCount).toBe(2)
+    expect(result.channels).toEqual({
+      orders: { subscription_count: 1 },
+      notifications: { subscription_count: 1 },
+    })
+    expect(first.takeLast('item-created')?.data).toBe('{"id":123}')
+    expect(second.takeLast('item-created')?.data).toBe('{"id":123}')
+  })
+
+  test('triggerBatch broadcasts multiple events and resolves batch info', async () => {
+    const namespace = new RealtimeNamespace(policy)
+    const conn = new TestConnection('socket-1')
+    namespace.connect(conn)
+
+    await namespace.receive(
+      conn.id,
+      JSON.stringify({
+        event: 'pusher:subscribe',
+        data: { channel: 'chat' },
+      }),
+    )
+
+    const result = await namespace.triggerBatch({
+      batch: [
+        {
+          name: 'msg-1',
+          channel: 'chat',
+          data: { text: 'one' },
+          info: 'subscription_count',
+        },
+        {
+          name: 'msg-2',
+          channel: 'chat',
+          data: { text: 'two' },
+        },
+      ],
+    })
+
+    expect(result.batch).toEqual([{ subscription_count: 1 }, {}])
+    expect(conn.takeLast('msg-2')?.data).toBe('{"text":"two"}')
+  })
+
+  test('queryChannels and queryChannel format standard Pusher responses', async () => {
+    const namespace = new RealtimeNamespace(policy)
+    const conn = new TestConnection('socket-1')
+    namespace.connect(conn)
+
+    await namespace.receive(
+      conn.id,
+      JSON.stringify({
+        event: 'pusher:subscribe',
+        data: { channel: 'public-news' },
+      }),
+    )
+
+    const allChannels = namespace.queryChannels({
+      info: 'subscription_count',
+    })
+    expect(allChannels).toEqual({
+      channels: {
+        'public-news': { subscription_count: 1 },
+      },
+    })
+
+    const filtered = namespace.queryChannels({
+      filterByPrefix: 'presence-',
+    })
+    expect(filtered).toEqual({ channels: {} })
+
+    const singleChannel = namespace.queryChannel('public-news', {
+      info: 'subscription_count',
+    })
+    expect(singleChannel).toEqual({
+      occupied: true,
+      subscription_count: 1,
+    })
+
+    const nonExistent = namespace.queryChannel('unknown')
+    expect(nonExistent).toBeNull()
+  })
 })
 
 async function signIn(

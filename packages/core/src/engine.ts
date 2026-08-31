@@ -9,13 +9,19 @@ import {
 } from './messages'
 import type {
   AppPolicy,
+  BatchEventPayload,
+  BatchTriggerResult,
   BroadcastEvent,
+  ChannelAttributes,
   ChannelOccupancy,
+  ChannelQueryResponse,
+  EventPayload,
   JsonValue,
   PresenceData,
   RealtimeConnection,
   RealtimeHooks,
   SessionSnapshot,
+  TriggerResult,
   UserInfo,
 } from './types'
 import {
@@ -224,6 +230,83 @@ export class RealtimeNamespace {
     return recipientCount
   }
 
+  public async trigger(payload: EventPayload): Promise<TriggerResult> {
+    const channels =
+      payload.channels ?? (payload.channel ? [payload.channel] : [])
+    let recipientCount = 0
+
+    for (const channel of channels) {
+      recipientCount += await this.broadcast({
+        channel,
+        event: payload.name,
+        data: payload.data,
+        exceptId: payload.socket_id,
+      })
+    }
+
+    if (payload.info) {
+      const requested = payload.info.split(',').map((s) => s.trim())
+      const includeUserCount = requested.includes('user_count')
+      const includeSubscriptionCount = requested.includes('subscription_count')
+
+      const result: Record<string, Record<string, number>> = {}
+
+      for (const channel of channels) {
+        const occ = this.getChannel(channel)
+        const attrs: Record<string, number> = {}
+        if (occ) {
+          if (includeUserCount && channel.startsWith('presence-')) {
+            attrs.user_count = occ.user_count
+          }
+          if (includeSubscriptionCount && !channel.startsWith('presence-')) {
+            attrs.subscription_count = occ.subscription_count
+          }
+        }
+        result[channel] = attrs
+      }
+
+      return { recipientCount, channels: result }
+    }
+
+    return { recipientCount }
+  }
+
+  public async triggerBatch(
+    payload: BatchEventPayload,
+  ): Promise<BatchTriggerResult> {
+    for (const item of payload.batch) {
+      await this.broadcast({
+        channel: item.channel,
+        event: item.name,
+        data: item.data,
+        exceptId: item.socket_id,
+      })
+    }
+
+    const batchResponses = payload.batch.map((item) => {
+      if (!item.info) return {}
+
+      const requested = item.info.split(',').map((s) => s.trim())
+      const includeUserCount = requested.includes('user_count')
+      const includeSubscriptionCount =
+        requested.includes('subscription_count')
+
+      const occ = this.getChannel(item.channel)
+      const attrs: Record<string, number> = {}
+      if (occ) {
+        if (includeUserCount && item.channel.startsWith('presence-')) {
+          attrs.user_count = occ.user_count
+        }
+        if (includeSubscriptionCount && !item.channel.startsWith('presence-')) {
+          attrs.subscription_count = occ.subscription_count
+        }
+      }
+      return attrs
+    })
+
+    return { batch: batchResponses }
+  }
+
   public getSession(socketId: string): SessionSnapshot | undefined {
     const session = this.sessions.get(socketId)
     if (!session) return undefined
@@ -251,6 +334,10 @@ export class RealtimeNamespace {
 
   public getSocketCount() {
     return this.sessions.size
+  }
+
+  public getChannelsCount() {
+    return this.channels.size
   }
 
   public getUsersCount() {
@@ -302,6 +389,69 @@ export class RealtimeNamespace {
     return [...(this.presenceUsers.get(channel)?.keys() ?? [])].map((id) => ({
       id,
     }))
+  }
+
+  public queryChannels(options?: {
+    filterByPrefix?: string
+    info?: string
+  }): { channels: Record<string, ChannelAttributes> } {
+    const requestedAttrs = options?.info
+      ? options.info.split(',').map((s) => s.trim())
+      : []
+    const includeUserCount = requestedAttrs.includes('user_count')
+    const includeSubscriptionCount =
+      requestedAttrs.includes('subscription_count')
+    const filterByPrefix = options?.filterByPrefix
+
+    const result: Record<string, ChannelAttributes> = {}
+
+    for (const [channel, sockets] of this.channels) {
+      if (filterByPrefix && !channel.startsWith(filterByPrefix)) continue
+
+      const attrs: ChannelAttributes = {}
+      if (includeSubscriptionCount && !channel.startsWith('presence-')) {
+        attrs.subscription_count = sockets.size
+      }
+      if (includeUserCount && channel.startsWith('presence-')) {
+        attrs.user_count = this.getMemberCount(channel)
+      }
+
+      result[channel] = attrs
+    }
+
+    return { channels: result }
+  }
+
+  public queryChannel(
+    channelName: string,
+    options?: { info?: string },
+  ): ChannelQueryResponse | null {
+    const sockets = this.channels.get(channelName)
+    if (!sockets || sockets.size === 0) return null
+
+    const requestedAttrs = options?.info
+      ? options.info.split(',').map((s) => s.trim())
+      : []
+    const response: ChannelQueryResponse = { occupied: true }
+
+    if (
+      requestedAttrs.includes('user_count') &&
+      channelName.startsWith('presence-')
+    ) {
+      response.user_count = this.getMemberCount(channelName)
+    }
+    if (
+      requestedAttrs.includes('subscription_count') &&
+      !channelName.startsWith('presence-')
+    ) {
+      response.subscription_count = sockets.size
+    }
+
+    return response
+  }
+
+  public queryChannelUsers(channelName: string): { id: string }[] | null {
+    return this.getChannelUsers(channelName)
   }
 
   public async terminateUserConnections(userId: string) {

@@ -259,14 +259,13 @@ export class SocketoServer {
         return c.json({ error: `Invalid info attribute: ${invalidAttr}` }, 400)
       }
 
-      for (const ch of chanList) {
-        await this.namespace.broadcast({
-          event: name,
-          channel: ch,
-          data: data ?? {},
-          exceptId: socket_id,
-        })
-      }
+      const result = await this.namespace.trigger({
+        name,
+        channels: chanList,
+        data: data ?? {},
+        socket_id,
+        info,
+      })
 
       if (this.verbose) {
         console.log(
@@ -277,29 +276,8 @@ export class SocketoServer {
         console.log(`[${ts()}] trigger    ${name} → ${chanList.join(', ')}`)
       }
 
-      if (info) {
-        const attrs = info.split(',').map((s) => s.trim())
-        const channelsRes: Record<
-          string,
-          { subscription_count?: number; user_count?: number }
-        > = {}
-        for (const ch of chanList) {
-          const chInfo = this.namespace.getChannel(ch)
-          const chRes: { subscription_count?: number; user_count?: number } = {}
-          if (chInfo) {
-            if (
-              attrs.includes('subscription_count') &&
-              !ch.startsWith('presence-')
-            ) {
-              chRes.subscription_count = chInfo.subscription_count
-            }
-            if (attrs.includes('user_count') && ch.startsWith('presence-')) {
-              chRes.user_count = chInfo.user_count
-            }
-          }
-          channelsRes[ch] = chRes
-        }
-        return c.json({ channels: channelsRes })
+      if (result.channels) {
+        return c.json({ channels: result.channels })
       }
 
       return c.json({})
@@ -348,59 +326,30 @@ export class SocketoServer {
         }
       }
 
-      const batchInfo: Record<
-        string,
-        { subscription_count?: number; user_count?: number }
-      > = {}
-      let hasInfo = false
+      const result = await this.namespace.triggerBatch({
+        batch: batch.map((item) => ({
+          name: item.name!,
+          channel: item.channel!,
+          data: item.data ?? {},
+          socket_id: item.socket_id,
+          info: item.info,
+        })),
+      })
 
-      for (const event of batch) {
-        if (!event.name || !event.channel) continue
-
-        await this.namespace.broadcast({
-          event: event.name,
-          channel: event.channel,
-          data: event.data ?? {},
-          exceptId: event.socket_id,
-        })
-
-        if (this.verbose) {
+      if (this.verbose) {
+        for (const event of batch) {
           console.log(
             `[${ts()}] batch      ${event.name} → ${event.channel}`,
             event.data ?? '',
           )
-        } else {
+        }
+      } else {
+        for (const event of batch) {
           console.log(`[${ts()}] batch      ${event.name} → ${event.channel}`)
         }
-
-        const infoRes: { subscription_count?: number; user_count?: number } = {}
-        if (event.info) {
-          const infoAttrs = event.info.split(',').map((s) => s.trim())
-          const chInfo = this.namespace.getChannel(event.channel)
-          if (chInfo) {
-            if (
-              infoAttrs.includes('subscription_count') &&
-              !event.channel.startsWith('presence-')
-            ) {
-              infoRes.subscription_count = chInfo.subscription_count
-            }
-            if (
-              infoAttrs.includes('user_count') &&
-              event.channel.startsWith('presence-')
-            ) {
-              infoRes.user_count = chInfo.user_count
-            }
-          }
-          batchInfo[event.channel] = infoRes
-          hasInfo = true
-        }
       }
 
-      if (hasInfo) {
-        return c.json({ batch: batchInfo })
-      }
-
-      return c.json({})
+      return c.json(result)
     })
 
     // List channels
@@ -423,36 +372,11 @@ export class SocketoServer {
         )
       }
 
-      const includeUserCount = infoAttrs.includes('user_count')
-      const includeSubCount = infoAttrs.includes('subscription_count')
-
-      const result: Record<string, Record<string, unknown>> = {}
-
-      if (includeUserCount) {
-        const all = this.namespace.getChannelsWithInfo()
-        for (const [name, counts] of all) {
-          if (prefix && !name.startsWith(prefix)) continue
-          const chInfo: { user_count?: number; subscription_count?: number } = {
-            user_count: counts.user_count,
-          }
-          if (includeSubCount && !name.startsWith('presence-')) {
-            chInfo.subscription_count = counts.subscription_count
-          }
-          result[name] = chInfo
-        }
-      } else {
-        const all = this.namespace.getChannels()
-        for (const [name, count] of all) {
-          if (prefix && !name.startsWith(prefix)) continue
-          const chInfo: { subscription_count?: number } = {}
-          if (includeSubCount && !name.startsWith('presence-')) {
-            chInfo.subscription_count = count
-          }
-          result[name] = chInfo
-        }
-      }
-
-      return c.json({ channels: result })
+      const result = this.namespace.queryChannels({
+        filterByPrefix: prefix,
+        info,
+      })
+      return c.json(result)
     })
 
     // Get channel info
@@ -487,24 +411,12 @@ export class SocketoServer {
         )
       }
 
-      const channelInfo = this.namespace.getChannel(channel)
-      if (!channelInfo) {
+      const result = this.namespace.queryChannel(channel, { info })
+      if (!result) {
         return c.json({ occupied: false })
       }
 
-      const res: {
-        occupied: boolean
-        subscription_count?: number
-        user_count?: number
-      } = { occupied: true }
-      if (infoAttrs.includes('subscription_count')) {
-        res.subscription_count = channelInfo.subscription_count
-      }
-      if (infoAttrs.includes('user_count')) {
-        res.user_count = channelInfo.user_count
-      }
-
-      return c.json(res)
+      return c.json(result)
     })
 
     // Get presence channel users
@@ -518,7 +430,7 @@ export class SocketoServer {
         )
       }
 
-      const users = this.namespace.getChannelUsers(channel)
+      const users = this.namespace.queryChannelUsers(channel)
       return c.json({ users: users ?? [] })
     })
 
