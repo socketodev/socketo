@@ -243,6 +243,12 @@ export class RealtimeNamespace {
     return snapshot
   }
 
+  public getAllSessions(): SessionSnapshot[] {
+    return [...this.sessions.keys()]
+      .map((id) => this.getSession(id))
+      .filter((s): s is SessionSnapshot => s !== undefined)
+  }
+
   public getSocketCount() {
     return this.sessions.size
   }

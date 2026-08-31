@@ -7,33 +7,63 @@ import {
   invalidInfoAttribute,
   type JsonValue,
   type RealtimeConnection,
+  type RealtimeHooks,
   RealtimeNamespace,
   serializeMessage,
   verifyRestAuth,
-} from '@socketo/core'
+} from '@socketo/realtime-core'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import {
-  decodeAuthRequest,
-  decodeBatchRequest,
-  decodeEventTriggerRequest,
-} from './protocol.js'
 
-const APP_KEY = 'local'
 const BATCH_LIMIT = 10
 
 type WsSocket = import('ws').WebSocket
+type WsServer = import('ws').WebSocketServer
 
-type AppVariables = {
-  parsedBody: JsonValue
-}
-
-export type ServerOptions = {
+export interface ServerOptions {
   port?: number
+  host?: string
+  appId?: string
+  appKey?: string
   appSecret?: string
+  verbose?: boolean
 }
 
-function ts() {
+type HonoEnv = {
+  Variables: {
+    parsedBody: unknown
+  }
+}
+
+interface AuthRequestBody {
+  socket_id?: string
+  channel_name?: string
+  channel_data?: string
+}
+
+interface TriggerRequestBody {
+  name?: string
+  channels?: string[]
+  channel?: string
+  data?: JsonValue
+  socket_id?: string
+  info?: string
+}
+
+interface BatchEventItem {
+  name?: string
+  channel?: string
+  channels?: string[]
+  data?: JsonValue
+  socket_id?: string
+  info?: string
+}
+
+interface BatchRequestBody {
+  batch?: BatchEventItem[]
+}
+
+function ts(): string {
   return new Date().toISOString().slice(11, 19)
 }
 
@@ -49,7 +79,9 @@ function toConnection(id: string, ws: WsSocket): RealtimeConnection {
   return {
     id,
     send(message) {
-      sendSocket(ws, message)
+      if (ws.readyState === ws.OPEN) {
+        sendSocket(ws, message)
+      }
     },
     close(code, reason) {
       try {
@@ -63,7 +95,11 @@ function toConnection(id: string, ws: WsSocket): RealtimeConnection {
 
 export class SocketoServer {
   public readonly port: number
+  public readonly host: string
+  public readonly appId: string
+  public readonly appKey: string
   public readonly appSecret: string
+  public verbose: boolean
   private readonly namespace: RealtimeNamespace
   private readonly timers = new Map<
     string,
@@ -73,31 +109,67 @@ export class SocketoServer {
     }
   >()
   private httpServer: ReturnType<typeof createHttpServer> | null = null
+  private wss: WsServer | null = null
+  private readonly sockets = new Set<WsSocket>()
 
   private readonly ACTIVITY_TIMEOUT = 120_000
   private readonly PONG_TIMEOUT = 30_000
 
   constructor(options: ServerOptions = {}) {
     this.port = options.port ?? 8787
-    this.appSecret = options.appSecret || ''
+    this.host = options.host || '0.0.0.0'
+    this.appKey = options.appKey || 'local'
+    this.appId = options.appId || this.appKey
+    this.appSecret = options.appSecret || this.appKey
+    this.verbose = options.verbose ?? false
+
     const policy: AppPolicy = {
-      key: APP_KEY,
-      secret: this.appSecret || APP_KEY,
+      key: this.appKey,
+      secret: this.appSecret || this.appKey,
       enableClientEvents: true,
     }
-    this.namespace = new RealtimeNamespace(policy)
+
+    const hooks: RealtimeHooks = {
+      onClientEvent: (event) => {
+        if (this.verbose) {
+          console.log(
+            `[${ts()}] client-event ${event.event} on ${event.channel}`,
+            event.data ?? '',
+          )
+        } else {
+          console.log(
+            `[${ts()}] client-event ${event.event} on ${event.channel}`,
+          )
+        }
+      },
+      onMemberAdded: (channel, userId) => {
+        console.log(`[${ts()}] member+     ${userId} → ${channel}`)
+      },
+      onMemberRemoved: (channel, userId) => {
+        console.log(`[${ts()}] member-     ${userId} ← ${channel}`)
+      },
+      onChannelOccupied: (channel) => {
+        console.log(`[${ts()}] occupied    ${channel}`)
+      },
+      onChannelVacated: (channel) => {
+        console.log(`[${ts()}] vacated     ${channel}`)
+      },
+    }
+
+    this.namespace = new RealtimeNamespace(policy, hooks)
   }
 
-  createApp(): Hono<{ Variables: AppVariables }> {
-    const app = new Hono<{ Variables: AppVariables }>()
-    const secret = this.appSecret || APP_KEY
+  createApp(): Hono<HonoEnv> {
+    const app = new Hono<HonoEnv>()
+    const appKey = this.appKey
+    const secret = this.appSecret || appKey
 
     app.use('*', cors())
 
     // REST Auth Middleware
     app.use('/apps/:id/*', async (c, next) => {
       const appId = c.req.param('id')
-      if (appId !== APP_KEY) {
+      if (appKey !== '*' && appId !== appKey) {
         return c.json({ error: 'Invalid app key' }, 403)
       }
 
@@ -112,7 +184,7 @@ export class SocketoServer {
         path: url.pathname,
         query: url.searchParams,
         body: rawBody,
-        appKey: APP_KEY,
+        appKey: appId,
         appSecret: secret,
       })
 
@@ -139,58 +211,47 @@ export class SocketoServer {
 
     // Auth endpoint for private/presence channels
     app.post('/apps/:id/auth', (c) => {
-      const body = decodeAuthRequest(c.get('parsedBody') ?? {})
+      const body = (c.get('parsedBody') ?? {}) as AuthRequestBody
       const { socket_id, channel_name, channel_data } = body
 
       if (!socket_id || !channel_name) {
         return c.json({ error: 'Invalid payload' }, 400)
       }
-      if (
-        !channel_name.startsWith('private-') &&
-        !channel_name.startsWith('presence-')
-      ) {
-        return c.json(
-          { error: 'Public channels do not require authentication' },
-          400,
-        )
-      }
-      if (channel_name.startsWith('presence-') && !channel_data) {
-        return c.json(
-          { error: 'Missing channel_data for presence channel' },
-          400,
-        )
-      }
 
-      const stringToSign = channel_data
+      const signString = channel_data
         ? `${socket_id}:${channel_name}:${channel_data}`
         : `${socket_id}:${channel_name}`
-      const signature = createHmac('sha256', secret)
-        .update(stringToSign)
-        .digest('hex')
-      const auth = `${APP_KEY}:${signature}`
 
-      const res = {
-        auth,
-        channel_data,
-      } satisfies { auth: string; channel_data?: string }
+      const signature = createHmac('sha256', secret)
+        .update(signString)
+        .digest('hex')
+
+      const auth = `${appKey}:${signature}`
+
+      const res: { auth: string; channel_data?: string } = { auth }
+      if (channel_data !== undefined) res.channel_data = channel_data
+
       return c.json(res)
     })
 
-    // Event Trigger
+    // Single / Multi-channel Events Trigger
     app.post('/apps/:id/events', async (c) => {
-      const body = decodeEventTriggerRequest(c.get('parsedBody') ?? {})
+      const body = (c.get('parsedBody') ?? {}) as TriggerRequestBody
       const { name, channels, channel, data, socket_id, info } = body
 
       if (channel && channels) {
         return c.json(
-          { error: 'Specify either channel or channels, not both' },
+          { error: 'Cannot provide both channel and channels' },
           400,
         )
       }
 
       const chanList = channels ?? (channel ? [channel] : [])
-      if (chanList.length === 0 || !name) {
-        return c.json({ error: 'Missing channel or name' }, 400)
+      if (!name || chanList.length === 0) {
+        return c.json({ error: 'Invalid payload' }, 400)
+      }
+      if (channels && channels.length === 0) {
+        return c.json({ error: 'At least one channel must be specified' }, 400)
       }
 
       const invalidAttr = invalidInfoAttribute(info)
@@ -207,20 +268,24 @@ export class SocketoServer {
         })
       }
 
-      console.log(`[${ts()}] trigger    ${name} → ${chanList.join(', ')}`)
+      if (this.verbose) {
+        console.log(
+          `[${ts()}] trigger    ${name} → ${chanList.join(', ')}`,
+          data ?? '',
+        )
+      } else {
+        console.log(`[${ts()}] trigger    ${name} → ${chanList.join(', ')}`)
+      }
 
       if (info) {
         const attrs = info.split(',').map((s) => s.trim())
-        const result: Record<
+        const channelsRes: Record<
           string,
           { subscription_count?: number; user_count?: number }
         > = {}
         for (const ch of chanList) {
           const chInfo = this.namespace.getChannel(ch)
-          const chRes = {} satisfies {
-            subscription_count?: number
-            user_count?: number
-          }
+          const chRes: { subscription_count?: number; user_count?: number } = {}
           if (chInfo) {
             if (
               attrs.includes('subscription_count') &&
@@ -232,9 +297,9 @@ export class SocketoServer {
               chRes.user_count = chInfo.user_count
             }
           }
-          result[ch] = chRes
+          channelsRes[ch] = chRes
         }
-        return c.json({ channels: result })
+        return c.json({ channels: channelsRes })
       }
 
       return c.json({})
@@ -242,95 +307,39 @@ export class SocketoServer {
 
     // Batch Events Trigger
     app.post('/apps/:id/batch_events', async (c) => {
-      const body = decodeBatchRequest(c.get('parsedBody') ?? {})
+      const body = (c.get('parsedBody') ?? {}) as BatchRequestBody
       const batch = body.batch
 
       if (!batch || !Array.isArray(batch)) {
-        return c.json({ error: 'Invalid payload' }, 400)
+        return c.json({ error: 'Batch must be an array' }, 400)
       }
       if (batch.length === 0) {
-        return c.json({ error: 'Batch must contain at least one event' }, 400)
+        return c.json({ error: 'Batch cannot be empty' }, 400)
       }
       if (batch.length > BATCH_LIMIT) {
         return c.json(
-          { error: `Batch size must not exceed ${BATCH_LIMIT}` },
+          { error: `Batch size cannot exceed ${BATCH_LIMIT} events` },
           400,
         )
       }
 
       for (const event of batch) {
+        if (!event.name) {
+          return c.json({ error: 'Every event in batch requires a name' }, 400)
+        }
+        if (!event.channel) {
+          return c.json(
+            { error: 'Every event in batch requires a channel' },
+            400,
+          )
+        }
         if (event.channels) {
           return c.json(
-            { error: 'Batch events must use channel, not channels' },
+            { error: 'Batch events only support single channel' },
             400,
           )
         }
-        if (!event.name || !event.channel) {
-          return c.json(
-            { error: 'Each batch event must have name and channel' },
-            400,
-          )
-        }
-        if (event.info) {
-          const invalidAttr = invalidInfoAttribute(event.info)
-          if (invalidAttr) {
-            return c.json(
-              { error: `Invalid info attribute: ${invalidAttr}` },
-              400,
-            )
-          }
-        }
-      }
-
-      const results: Array<{
-        subscription_count?: number
-        user_count?: number
-      }> = []
-      for (const event of batch) {
-        await this.namespace.broadcast({
-          event: event.name!,
-          channel: event.channel!,
-          data: event.data ?? {},
-          exceptId: event.socket_id,
-        })
-
-        console.log(`[${ts()}] batch      ${event.name} → ${event.channel}`)
-
-        const infoRes = {} satisfies {
-          subscription_count?: number
-          user_count?: number
-        }
-        if (event.info) {
-          const infoAttrs = event.info.split(',').map((s) => s.trim())
-          const chInfo = this.namespace.getChannel(event.channel!)
-          if (chInfo) {
-            if (
-              infoAttrs.includes('subscription_count') &&
-              !event.channel!.startsWith('presence-')
-            ) {
-              infoRes.subscription_count = chInfo.subscription_count
-            }
-            if (
-              infoAttrs.includes('user_count') &&
-              event.channel!.startsWith('presence-')
-            ) {
-              infoRes.user_count = chInfo.user_count
-            }
-          }
-        }
-        results.push(infoRes)
-      }
-
-      return c.json({ batch: results })
-    })
-
-    // Channels List
-    app.get('/apps/:id/channels', (c) => {
-      const prefix = c.req.query('filter_by_prefix') || ''
-      const info = c.req.query('info') || ''
-
-      if (info) {
-        const invalidAttr = invalidInfoAttribute(info)
+        const invalidAttr = invalidInfoAttribute(event.info)
         if (invalidAttr) {
           return c.json(
             { error: `Invalid info attribute: ${invalidAttr}` },
@@ -339,59 +348,118 @@ export class SocketoServer {
         }
       }
 
-      const infoAttrs = info
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-      const includeUserCount = infoAttrs.includes('user_count')
-      const includeSubCount = infoAttrs.includes('subscription_count')
+      const batchInfo: Record<
+        string,
+        { subscription_count?: number; user_count?: number }
+      > = {}
+      let hasInfo = false
 
-      if (includeUserCount && !prefix.startsWith('presence-')) {
+      for (const event of batch) {
+        if (!event.name || !event.channel) continue
+
+        await this.namespace.broadcast({
+          event: event.name,
+          channel: event.channel,
+          data: event.data ?? {},
+          exceptId: event.socket_id,
+        })
+
+        if (this.verbose) {
+          console.log(
+            `[${ts()}] batch      ${event.name} → ${event.channel}`,
+            event.data ?? '',
+          )
+        } else {
+          console.log(`[${ts()}] batch      ${event.name} → ${event.channel}`)
+        }
+
+        const infoRes: { subscription_count?: number; user_count?: number } = {}
+        if (event.info) {
+          const infoAttrs = event.info.split(',').map((s) => s.trim())
+          const chInfo = this.namespace.getChannel(event.channel)
+          if (chInfo) {
+            if (
+              infoAttrs.includes('subscription_count') &&
+              !event.channel.startsWith('presence-')
+            ) {
+              infoRes.subscription_count = chInfo.subscription_count
+            }
+            if (
+              infoAttrs.includes('user_count') &&
+              event.channel.startsWith('presence-')
+            ) {
+              infoRes.user_count = chInfo.user_count
+            }
+          }
+          batchInfo[event.channel] = infoRes
+          hasInfo = true
+        }
+      }
+
+      if (hasInfo) {
+        return c.json({ batch: batchInfo })
+      }
+
+      return c.json({})
+    })
+
+    // List channels
+    app.get('/apps/:id/channels', (c) => {
+      const prefix = c.req.query('filter_by_prefix')
+      const info = c.req.query('info')
+      const infoAttrs = info ? info.split(',').map((s) => s.trim()) : []
+
+      const invalidAttr = invalidInfoAttribute(info)
+      if (invalidAttr) {
+        return c.json({ error: `Invalid info attribute: ${invalidAttr}` }, 400)
+      }
+      if (infoAttrs.includes('user_count') && prefix !== 'presence-') {
         return c.json(
-          { error: 'user_count requires filtering by presence- prefix' },
+          {
+            error:
+              'user_count requires filter_by_prefix=presence- or individual presence channel query',
+          },
           400,
         )
       }
 
-      const channels: Record<
-        string,
-        { user_count?: number; subscription_count?: number }
-      > = {}
+      const includeUserCount = infoAttrs.includes('user_count')
+      const includeSubCount = infoAttrs.includes('subscription_count')
+
+      const result: Record<string, Record<string, unknown>> = {}
+
       if (includeUserCount) {
         const all = this.namespace.getChannelsWithInfo()
         for (const [name, counts] of all) {
           if (prefix && !name.startsWith(prefix)) continue
-          const chInfo = {
+          const chInfo: { user_count?: number; subscription_count?: number } = {
             user_count: counts.user_count,
-          } satisfies { user_count?: number; subscription_count?: number }
+          }
           if (includeSubCount && !name.startsWith('presence-')) {
             chInfo.subscription_count = counts.subscription_count
           }
-          channels[name] = chInfo
+          result[name] = chInfo
         }
       } else {
         const all = this.namespace.getChannels()
         for (const [name, count] of all) {
           if (prefix && !name.startsWith(prefix)) continue
-          const chInfo = {} satisfies { subscription_count?: number }
+          const chInfo: { subscription_count?: number } = {}
           if (includeSubCount && !name.startsWith('presence-')) {
             chInfo.subscription_count = count
           }
-          channels[name] = chInfo
+          result[name] = chInfo
         }
       }
 
-      return c.json({ channels })
+      return c.json({ channels: result })
     })
 
-    // Channel Info
+    // Get channel info
     app.get('/apps/:id/channels/:name', (c) => {
       const channel = c.req.param('name')
-      const info = c.req.query('info') || ''
-      const infoAttrs = info
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
+      const info = c.req.query('info')
+      const infoAttrs = info ? info.split(',').map((s) => s.trim()) : []
 
       const invalidAttr = invalidInfoAttribute(info)
       if (invalidAttr) {
@@ -413,7 +481,7 @@ export class SocketoServer {
         return c.json(
           {
             error:
-              'subscription_count is only available for non-presence channels',
+              'subscription_count cannot be queried on presence channels (use user_count instead)',
           },
           400,
         )
@@ -424,38 +492,39 @@ export class SocketoServer {
         return c.json({ occupied: false })
       }
 
-      const res = {
-        occupied: true,
-      } satisfies {
+      const res: {
         occupied: boolean
         subscription_count?: number
         user_count?: number
-      }
+      } = { occupied: true }
       if (infoAttrs.includes('subscription_count')) {
         res.subscription_count = channelInfo.subscription_count
       }
       if (infoAttrs.includes('user_count')) {
         res.user_count = channelInfo.user_count
       }
+
       return c.json(res)
     })
 
-    // Presence Channel Users
+    // Get presence channel users
     app.get('/apps/:id/channels/:name/users', (c) => {
       const channel = c.req.param('name')
-      const users = this.namespace.getChannelUsers(channel)
-      if (users === null) {
+
+      if (!channel.startsWith('presence-')) {
         return c.json(
-          { error: 'users endpoint is only available for presence channels' },
+          { error: 'Users endpoint is only available for presence channels' },
           400,
         )
       }
-      return c.json({ users })
+
+      const users = this.namespace.getChannelUsers(channel)
+      return c.json({ users: users ?? [] })
     })
 
-    // Terminate Connections
-    app.post('/apps/:id/users/:userId/terminate_connections', async (c) => {
-      const userId = c.req.param('userId')
+    // Terminate user connections
+    app.post('/apps/:id/users/:user_id/terminate_connections', async (c) => {
+      const userId = c.req.param('user_id')
       await this.namespace.terminateUserConnections(userId)
       return c.json({})
     })
@@ -463,41 +532,43 @@ export class SocketoServer {
     return app
   }
 
-  async listen(port = this.port): Promise<void> {
+  async listen(): Promise<void> {
     const { WebSocketServer } = await import('ws')
+    const port = this.port
+    const host = this.host
     const app = this.createApp()
-    const requestListener = getRequestListener(app.fetch)
-    const httpServer = createHttpServer(requestListener)
+    const appKey = this.appKey
+
+    const httpServer = createHttpServer(getRequestListener(app.fetch))
     this.httpServer = httpServer
-
     const wss = new WebSocketServer({ noServer: true })
+    this.wss = wss
 
-    httpServer.on('upgrade', (req, socket, head) => {
-      const url = new URL(req.url || '', `http://${req.headers.host}`)
+    httpServer.on('upgrade', (request, socket, head) => {
+      const url = new URL(request.url || '/', `http://${host}:${port}`)
       const match = url.pathname.match(/^\/app\/([^/]+)$/)
 
-      if (!match) {
-        socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
+      if (!match || (appKey !== '*' && match[1] !== appKey)) {
         socket.destroy()
         return
       }
 
-      const appKey = match[1]
       const protocol = url.searchParams.get('protocol')
-
-      if (appKey !== APP_KEY) {
-        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
-        socket.destroy()
+      if (!protocol) {
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          this.rejectSocket(ws, 4008, 'No protocol version supplied')
+        })
         return
       }
-
       if (protocol !== '7') {
-        socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-        socket.destroy()
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          this.rejectSocket(ws, 4007, 'Unsupported protocol version')
+        })
         return
       }
 
-      wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        this.sockets.add(ws)
         const socketId = generateSocketId()
         this.namespace.connect(toConnection(socketId, ws))
         this.startActivityTimer(socketId, ws)
@@ -513,39 +584,140 @@ export class SocketoServer {
           }),
         )
 
-        console.log(`[${ts()}] connect    ${socketId.slice(0, 8)}`)
+        if (this.verbose) {
+          console.log(`[${ts()}] connect    ${socketId}`)
+        }
 
         ws.on('message', (rawData: string | Buffer) => {
           this.startActivityTimer(socketId, ws)
-          const text = String(rawData)
+          const text =
+            typeof rawData === 'string'
+              ? rawData
+              : Buffer.from(rawData).toString()
           void this.namespace.receive(socketId, text).catch(() => undefined)
         })
 
-        let disconnected = false
-        const disconnect = () => {
-          if (disconnected) return
-          disconnected = true
+        ws.on('close', () => {
+          this.sockets.delete(ws)
           this.clearTimers(socketId)
-          void this.namespace.disconnect(socketId).catch(() => undefined)
-          console.log(`[${ts()}] disconnect ${socketId.slice(0, 8)}`)
-        }
-
-        ws.on('error', disconnect)
-        ws.on('close', disconnect)
+          this.namespace.disconnect(socketId)
+          if (this.verbose) {
+            console.log(`[${ts()}] disconnect ${socketId}`)
+          }
+        })
       })
     })
 
     return new Promise<void>((resolve) => {
-      httpServer.listen(port, () => resolve())
+      httpServer.listen(port, host === '0.0.0.0' ? undefined : host, () =>
+        resolve(),
+      )
     })
   }
 
   async close(): Promise<void> {
+    for (const [, timer] of this.timers) {
+      clearInterval(timer.activity)
+      if (timer.pong) clearTimeout(timer.pong)
+    }
+    this.timers.clear()
+
+    for (const ws of this.sockets) {
+      try {
+        ws.terminate()
+      } catch {
+        // Socket already closed
+      }
+    }
+    this.sockets.clear()
+
+    if (this.wss) {
+      this.wss.close()
+      this.wss = null
+    }
+
     const httpServer = this.httpServer
-    if (!httpServer) return
-    await new Promise<void>((resolve) => {
-      httpServer.close(() => resolve())
+    if (httpServer) {
+      await new Promise<void>((resolve) => {
+        httpServer.close(() => resolve())
+      })
+      this.httpServer = null
+    }
+  }
+
+  public async broadcast(
+    channel: string,
+    event: string,
+    data: JsonValue = {},
+  ): Promise<number> {
+    return this.namespace.broadcast({
+      channel,
+      event,
+      data,
     })
+  }
+
+  public getChannelsInfo(): Map<
+    string,
+    { subscription_count: number; user_count: number }
+  > {
+    return this.namespace.getChannelsWithInfo()
+  }
+
+  public getPresenceUsers(channel: string): Array<{ id: string }> | null {
+    return this.namespace.getChannelUsers(channel)
+  }
+
+  public getSocketsInfo(): Array<{
+    id: string
+    channels: string[]
+    userId?: string
+  }> {
+    return this.namespace.getAllSessions().map((s) => ({
+      id: s.id,
+      channels: s.channels,
+      userId: s.userId,
+    }))
+  }
+
+  public async terminateUser(userId: string): Promise<void> {
+    await this.namespace.terminateUserConnections(userId)
+  }
+
+  public toggleVerbose(): boolean {
+    this.verbose = !this.verbose
+    return this.verbose
+  }
+
+  public printBanner(): void {
+    const DIM = '\x1b[2m'
+    // Primary brand color: oklch(60% .118 184.704) -> rgb(0, 150, 137)
+    const PRIMARY = '\x1b[38;2;0;150;137m'
+    const PRIMARY_BOLD = '\x1b[1;38;2;0;150;137m'
+    const RESET = '\x1b[0m'
+
+    const displayHost = this.host === '0.0.0.0' ? 'localhost' : this.host
+    const wsUrl = `ws://${displayHost}:${this.port}`
+    const restUrl = `http://${displayHost}:${this.port}`
+
+    const isUnified =
+      this.appId === this.appKey && this.appKey === this.appSecret
+
+    const credLine = isUnified
+      ? `  ${DIM}➜${RESET}  ${PRIMARY}App id/key/secret:${RESET}  ${this.appKey}`
+      : `  ${DIM}➜${RESET}  ${PRIMARY}App ID:${RESET}             ${this.appId}\n  ${DIM}➜${RESET}  ${PRIMARY}App Key:${RESET}            ${this.appKey}\n  ${DIM}➜${RESET}  ${PRIMARY}App Secret:${RESET}         ${this.appSecret}`
+
+    console.log(`
+  ${PRIMARY_BOLD}⚡ Socketo Dev Server${RESET}
+
+  ${DIM}➜${RESET}  ${PRIMARY}WebSocket:${RESET}          ${wsUrl}
+  ${DIM}➜${RESET}  ${PRIMARY}REST API:${RESET}           ${restUrl}
+${credLine}
+  ${DIM}➜${RESET}  ${PRIMARY}Verbose:${RESET}            ${this.verbose ? 'enabled' : 'disabled'} ${DIM}(/v to toggle)${RESET}
+
+  ${DIM}Type${RESET} ${PRIMARY}/help${RESET} ${DIM}for interactive commands (e.g. /trigger)${RESET}
+  ${DIM}Type${RESET} ${PRIMARY}/quit${RESET} ${DIM}or press Ctrl+C to stop${RESET}
+`)
   }
 
   private rejectSocket(ws: WsSocket, code: number, message: string): void {
