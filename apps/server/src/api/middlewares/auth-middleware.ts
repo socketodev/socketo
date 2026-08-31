@@ -1,21 +1,8 @@
-import crypto from 'node:crypto'
+import { verifyRestAuth } from '@socketo/core'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import type { HonoContext } from '@/types'
 import { querySchema } from '../schemas/apps'
-
-function generateQueryString(rest: Record<string, string>): string {
-  const keys = Object.keys(rest).sort()
-  return keys.map((key) => `${key}=${rest[key]}`).join('&')
-}
-
-function verifySignature(secret: string, body: string) {
-  return crypto.createHmac('sha256', secret).update(body).digest('hex')
-}
-
-function verifyBodyMd5(body: string) {
-  return crypto.createHash('md5').update(body).digest('hex')
-}
 
 export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   const parsed = querySchema.safeParse(c.req.query())
@@ -24,25 +11,22 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
     return c.json({ status: false, errors: parsed.error.issues }, 400)
   }
 
-  const { secret } = c.get('app')
-  const { auth_signature, ...rest } = parsed.data
+  const { key, secret } = c.get('app')
+  const isBodyMethod = ['POST', 'PUT', 'PATCH'].includes(
+    c.req.method.toUpperCase(),
+  )
+  const body = isBodyMethod ? await c.req.text() : undefined
 
-  if (['POST', 'PUT', 'PATCH'].includes(c.req.method)) {
-    const body = await c.req.text()
-    const expectedBodyMd5 = verifyBodyMd5(body)
+  const isValid = verifyRestAuth({
+    method: c.req.method,
+    path: c.req.path,
+    query: new URL(c.req.url).searchParams,
+    body,
+    appKey: key,
+    appSecret: secret,
+  })
 
-    if (!rest.body_md5 || rest.body_md5 !== expectedBodyMd5) {
-      throw new HTTPException(401, {
-        message: 'Invalid body_md5 hash. Payload tampered.',
-      })
-    }
-  }
-
-  const queryString = generateQueryString(rest)
-  const stringToSign = `${c.req.method}\n${c.req.path}\n${queryString}`
-  const expectedSignature = verifySignature(secret, stringToSign)
-
-  if (auth_signature !== expectedSignature) {
+  if (!isValid) {
     throw new HTTPException(401, { message: 'Invalid auth signature' })
   }
 

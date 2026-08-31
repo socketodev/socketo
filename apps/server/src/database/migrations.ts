@@ -2,7 +2,7 @@ import type { Migration, MigrationProvider } from 'kysely'
 import { type Kysely, Migrator } from 'kysely'
 import type { Database } from './types'
 
-export const migrations: Record<string, Migration> = {
+export const migrations = {
   '001': {
     async up(db) {
       await db.schema
@@ -13,7 +13,7 @@ export const migrations: Record<string, Migration> = {
         .addColumn('max_connections', 'integer', (col) =>
           col.notNull().defaultTo(10000),
         )
-        .addColumn('enable_client_events', 'boolean', (col) =>
+        .addColumn('enable_client_events', 'integer', (col) =>
           col.notNull().defaultTo(1),
         )
         .addColumn('location_hint', 'text')
@@ -23,7 +23,7 @@ export const migrations: Record<string, Migration> = {
       await db.schema.dropTable('apps').execute()
     },
   },
-}
+} satisfies Record<string, Migration>
 
 class ObjectMigrationProvider implements MigrationProvider {
   getMigrations() {

@@ -25,7 +25,22 @@ export class DatabaseDO extends DurableObject<Env> {
       .executeTakeFirst()
   }
 
+  public async getAppByIdOrKey(identifier: string) {
+    return this.db
+      .selectFrom('apps')
+      .selectAll()
+      .where((eb) =>
+        eb.or([eb('id', '=', identifier), eb('key', '=', identifier)]),
+      )
+      .executeTakeFirst()
+  }
+
   async migrate() {
-    return createMigrator(this.db).migrateToLatest()
+    const migrator = createMigrator(this.db)
+    const { error, results } = await migrator.migrateToLatest()
+    if (error) {
+      throw error
+    }
+    return { results }
   }
 }

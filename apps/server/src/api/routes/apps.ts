@@ -1,3 +1,4 @@
+import { invalidInfoAttribute } from '@socketo/core'
 import { Hono } from 'hono'
 import { validator } from 'hono/validator'
 import type { HonoContext } from '@/types'
@@ -11,10 +12,8 @@ app.use('/:key/*', appMiddleware, authMiddleware)
 
 app.get('/:key/sockets', async (c) => {
   const { stub } = c.get('app')
-
   const sockets = await stub.getSocketCount()
-
-  return c.json({ sockets })
+  return c.json({ sockets }, 200)
 })
 
 app.get('/:key/channels', async (c) => {
@@ -22,51 +21,24 @@ app.get('/:key/channels', async (c) => {
   const filterByPrefix = c.req.query('filter_by_prefix')
   const info = c.req.query('info')
 
+  const invalidAttr = invalidInfoAttribute(info)
+  if (invalidAttr) {
+    return c.json({ error: `Invalid info attribute: ${invalidAttr}` }, 400)
+  }
+
   const requestedAttrs = info ? info.split(',').map((s) => s.trim()) : []
-
-  const includeUserCount = requestedAttrs.includes('user_count')
-  const includeSubscriptionCount =
-    requestedAttrs.length === 0 || requestedAttrs.includes('subscription_count')
-
-  if (includeUserCount && !filterByPrefix?.startsWith('presence-')) {
+  if (
+    requestedAttrs.includes('user_count') &&
+    !filterByPrefix?.startsWith('presence-')
+  ) {
     return c.json(
       { error: 'user_count requires filtering by presence- prefix' },
       400,
     )
   }
 
-  const channels: Record<string, Record<string, unknown>> = {}
-
-  if (includeUserCount) {
-    const result = await stub.getChannelsWithInfo()
-
-    for (const [channel, counts] of result) {
-      if (filterByPrefix && !channel.startsWith(filterByPrefix)) continue
-
-      const attrs: Record<string, unknown> = {}
-      if (includeSubscriptionCount) {
-        attrs.subscription_count = counts.subscription_count
-      }
-      attrs.user_count = counts.user_count
-
-      channels[channel] = attrs
-    }
-  } else {
-    const result = await stub.getChannels()
-
-    for (const [channel, subscriptionCount] of result) {
-      if (filterByPrefix && !channel.startsWith(filterByPrefix)) continue
-
-      const attrs: Record<string, unknown> = {}
-      if (includeSubscriptionCount) {
-        attrs.subscription_count = subscriptionCount
-      }
-
-      channels[channel] = attrs
-    }
-  }
-
-  return c.json({ channels }, 200)
+  const result = await stub.queryChannels({ filterByPrefix, info })
+  return c.json(result, 200)
 })
 
 app.get('/:key/channels/:channel_name', async (c) => {
@@ -74,14 +46,12 @@ app.get('/:key/channels/:channel_name', async (c) => {
   const channelName = c.req.param('channel_name')
   const info = c.req.query('info')
 
-  const channel = await stub.getChannel(channelName)
-
-  if (!channel) {
-    return c.json({ occupied: false }, 200)
+  const invalidAttr = invalidInfoAttribute(info)
+  if (invalidAttr) {
+    return c.json({ error: `Invalid info attribute: ${invalidAttr}` }, 400)
   }
 
   const requestedAttrs = info ? info.split(',').map((s) => s.trim()) : []
-
   if (
     requestedAttrs.includes('user_count') &&
     !channelName.startsWith('presence-')
@@ -91,29 +61,31 @@ app.get('/:key/channels/:channel_name', async (c) => {
       400,
     )
   }
-
-  const response: Record<string, unknown> = { occupied: true }
-
-  if (requestedAttrs.length === 0 || requestedAttrs.includes('user_count')) {
-    response.user_count = channel.user_count
-  }
-
   if (
-    requestedAttrs.length === 0 ||
-    requestedAttrs.includes('subscription_count')
+    requestedAttrs.includes('subscription_count') &&
+    channelName.startsWith('presence-')
   ) {
-    response.subscription_count = channel.subscription_count
+    return c.json(
+      {
+        error: 'subscription_count is only available for non-presence channels',
+      },
+      400,
+    )
   }
 
-  return c.json(response)
+  const result = await stub.queryChannel(channelName, { info })
+  if (!result) {
+    return c.json({ occupied: false }, 200)
+  }
+
+  return c.json(result, 200)
 })
 
 app.get('/:key/channels/:channel_name/users', async (c) => {
   const { stub } = c.get('app')
   const channelName = c.req.param('channel_name')
 
-  const users = await stub.getChannelUsers(channelName)
-
+  const users = await stub.queryChannelUsers(channelName)
   if (users === null) {
     return c.json(
       { error: 'users endpoint is only available for presence channels' },
@@ -121,7 +93,7 @@ app.get('/:key/channels/:channel_name/users', async (c) => {
     )
   }
 
-  return c.json({ users })
+  return c.json({ users }, 200)
 })
 
 app.post('/:key/users/:user_id/terminate_connections', async (c) => {
@@ -129,8 +101,7 @@ app.post('/:key/users/:user_id/terminate_connections', async (c) => {
   const userId = c.req.param('user_id')
 
   await stub.terminateUserConnections(userId)
-
-  return c.json({})
+  return c.json({}, 200)
 })
 
 app.post(
@@ -145,30 +116,14 @@ app.post(
   async (c) => {
     const { stub } = c.get('app')
     const payload = c.req.valid('json')
+    const invalidAttr = invalidInfoAttribute(payload.info)
+    if (invalidAttr) {
+      return c.json({ error: `Invalid info attribute: ${invalidAttr}` }, 400)
+    }
 
-    await stub.broadcast(payload)
-
-    if (payload.info) {
-      const requested = payload.info.split(',').map((s) => s.trim())
-      const includeUserCount = requested.includes('user_count')
-      const includeSubscriptionCount = requested.includes('subscription_count')
-
-      const channels =
-        payload.channels ?? (payload.channel ? [payload.channel] : [])
-      const result: Record<string, Record<string, number>> = {}
-
-      for (const channel of channels) {
-        const occ = await stub.getChannel(channel)
-        const attrs: Record<string, number> = {}
-        if (occ) {
-          if (includeUserCount) attrs.user_count = occ.user_count
-          if (includeSubscriptionCount)
-            attrs.subscription_count = occ.subscription_count
-        }
-        result[channel] = attrs
-      }
-
-      return c.json({ channels: result }, 200)
+    const result = await stub.trigger(payload)
+    if (result.channels) {
+      return c.json({ channels: result.channels }, 200)
     }
 
     return c.json({}, 200)
@@ -187,30 +142,15 @@ app.post(
   async (c) => {
     const { stub } = c.get('app')
     const payload = c.req.valid('json')
+    for (const item of payload.batch) {
+      const invalidAttr = invalidInfoAttribute(item.info)
+      if (invalidAttr) {
+        return c.json({ error: `Invalid info attribute: ${invalidAttr}` }, 400)
+      }
+    }
 
-    await stub.broadcast(payload)
-
-    const batchResponses = await Promise.all(
-      payload.batch.map(async (item) => {
-        if (!item.info) return {}
-
-        const requested = item.info.split(',').map((s) => s.trim())
-        const includeUserCount = requested.includes('user_count')
-        const includeSubscriptionCount =
-          requested.includes('subscription_count')
-
-        const occ = await stub.getChannel(item.channel)
-        const attrs: Record<string, number> = {}
-        if (occ) {
-          if (includeUserCount) attrs.user_count = occ.user_count
-          if (includeSubscriptionCount)
-            attrs.subscription_count = occ.subscription_count
-        }
-        return attrs
-      }),
-    )
-
-    return c.json({ batch: batchResponses }, 200)
+    const result = await stub.triggerBatch(payload)
+    return c.json(result, 200)
   },
 )
 

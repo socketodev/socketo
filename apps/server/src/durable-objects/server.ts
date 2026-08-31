@@ -1,9 +1,13 @@
 import { DurableObject } from 'cloudflare:workers'
+import {
+  createErrorMessage,
+  createHandshakeMessage,
+  serializeMessage,
+} from '@socketo/core'
 import type { BatchEvent, Event } from '@/api/schemas/apps'
 import { AppHandler } from '@/handlers/app-handler'
 import { WebSocketHandler } from '@/handlers/ws-handler'
 import { ConnectionManager } from '@/managers/connection-manager'
-import { isPresenceChannel } from '@/utils/auth'
 
 export class ServerDO extends DurableObject<Env> {
   private app: AppHandler
@@ -19,84 +23,44 @@ export class ServerDO extends DurableObject<Env> {
   }
 
   public webSocketMessage(ws: WebSocket, message: string) {
-    this.ws.handleMessage(ws, message)
+    return this.ws.handleMessage(ws, message)
   }
 
   public webSocketClose(ws: WebSocket) {
-    this.ws.handleClose(ws)
+    return this.ws.handleClose(ws)
   }
 
-  public webSocketError(ws: WebSocket, error: unknown) {
-    const { id } = ws.deserializeAttachment()
-    console.error('WebSocket Error:', id, error)
+  public webSocketError(ws: WebSocket, error: Error) {
+    const attachment = ws.deserializeAttachment()
+    console.error('WebSocket Error:', attachment?.id, error)
   }
 
-  public broadcast(payload: Event | BatchEvent) {
-    if ('batch' in payload) {
-      for (const item of payload.batch) {
-        const { name, channel, data, socket_id } = item
-        this.connections.broadcast(channel, name, data, socket_id)
-      }
-    } else {
-      const { name, data, socket_id } = payload
-      const channels =
-        payload.channels ?? (payload.channel ? [payload.channel] : [])
-      for (const channel of channels) {
-        this.connections.broadcast(channel, name, data, socket_id)
-      }
-    }
+  public trigger(payload: Event) {
+    return this.ws.trigger(payload)
   }
 
-  public getChannels() {
-    const channels = new Map<string, number>()
-
-    for (const [channel, sockets] of this.connections.getChannels()) {
-      channels.set(channel, sockets.size)
-    }
-
-    return channels
+  public triggerBatch(payload: BatchEvent) {
+    return this.ws.triggerBatch(payload)
   }
 
-  public getChannelsWithInfo() {
-    const result = new Map<
-      string,
-      { subscription_count: number; user_count: number }
-    >()
-
-    for (const [channel, sockets] of this.connections.getChannels()) {
-      result.set(channel, {
-        subscription_count: sockets.size,
-        user_count: this.connections.getMemberCount(channel),
-      })
-    }
-
-    return result
+  public queryChannels(options?: { filterByPrefix?: string; info?: string }) {
+    return this.ws.queryChannels(options)
   }
 
-  public getChannel(channelName: string) {
-    const occupancy = this.connections.getChannelOccupancy(channelName)
-
-    if (!occupancy.occupied) {
-      return null
-    }
-
-    return occupancy
+  public queryChannel(channelName: string, options?: { info?: string }) {
+    return this.ws.queryChannel(channelName, options)
   }
 
-  public getChannelUsers(channelName: string) {
-    if (!isPresenceChannel(channelName)) {
-      return null
-    }
-
-    return this.connections.getPresenceChannelUsers(channelName)
+  public queryChannelUsers(channelName: string) {
+    return this.ws.queryChannelUsers(channelName)
   }
 
-  public terminateUserConnections(userId: string) {
-    this.connections.terminateUserConnections(userId)
+  public async terminateUserConnections(userId: string) {
+    await this.ws.terminateUserConnections(userId)
   }
 
   public getSocketCount() {
-    return this.connections.getSocketCount()
+    return this.ws.getSocketCount()
   }
 
   public async fetch(request: Request): Promise<Response> {
@@ -106,38 +70,38 @@ export class ServerDO extends DurableObject<Env> {
     const protocol = url.searchParams.get('protocol')
     if (!protocol) {
       return this.rejectConnection(4008, 'No protocol version supplied')
-    } else if (Number(protocol) !== 7) {
+    } else if (protocol !== '7') {
       return this.rejectConnection(4007, 'Unsupported protocol version')
     }
 
-    const app = await this.app.getConfig(key).catch(() => null)
+    const app = await this.app.getConfig(key)
     if (!app) {
       return this.rejectConnection(4001, 'App not found')
     }
+
+    this.ws.configure(app)
 
     if (!this.ws.canAcceptNewConnection(app.max_connections)) {
       return this.rejectConnection(4004, 'Connection quota exceeded')
     }
 
     const { client, server, socketId } = this.connections.upgrade()
+    this.ws.register(server)
 
-    this.connections.sendTo(server, {
-      event: 'pusher:connection_established',
-      data: {
-        socket_id: socketId,
-        activity_timeout: 120,
-      },
-    })
+    this.connections.sendTo(
+      server,
+      serializeMessage(createHandshakeMessage(socketId, 120)),
+    )
 
     return new Response(null, { status: 101, webSocket: client })
   }
 
   private rejectConnection(code: number, message: string): Response {
     const { client, server } = this.connections.upgrade()
-    this.connections.sendTo(server, {
-      event: 'pusher:error',
-      data: { code, message },
-    })
+    this.connections.sendTo(
+      server,
+      serializeMessage(createErrorMessage(code, message)),
+    )
     server.close(code, message)
     return new Response(null, { status: 101, webSocket: client })
   }

@@ -1,0 +1,30 @@
+{
+  "name": "@socketo/core",
+  "version": "0.0.3",
+  "description": "Internal Pusher-compatible realtime protocol core",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
+  }
+}

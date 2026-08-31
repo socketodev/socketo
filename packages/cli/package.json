@@ -1,0 +1,48 @@
+{
+  "name": "@socketo/cli",
+  "version": "0.0.3",
+  "description": "Local Pusher-compatible WebSocket server for development",
+  "type": "module",
+  "license": "GPL-3.0",
+  "homepage": "https://socketo.dev",
+  "author": "eckoln",
+  "keywords": [
+    "pusher",
+    "websocket",
+    "local",
+    "dev",
+    "channels"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "socketo": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rolldown -c",
+    "test": "bun test",
+    "start": "bun run dist/index.js start",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.5",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@socketo/core": "workspace:*",
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.5.10",
+    "rolldown": "1.0.0-rc.17",
+    "typescript": "^6.0.3"
+  }
+}

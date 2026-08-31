@@ -1,12 +1,14 @@
 import { z } from 'zod'
 
-export const querySchema = z.object({
-  auth_key: z.string(),
-  auth_timestamp: z.string(),
-  auth_version: z.string(),
-  auth_signature: z.string(),
-  body_md5: z.string().optional(),
-})
+export const querySchema = z
+  .object({
+    auth_key: z.string(),
+    auth_timestamp: z.string(),
+    auth_version: z.string(),
+    auth_signature: z.string(),
+    body_md5: z.string().optional(),
+  })
+  .catchall(z.string())
 
 export const eventSchema = z
   .object({
@@ -17,17 +19,14 @@ export const eventSchema = z
     socket_id: z.string().optional(),
     info: z.string().optional(),
   })
-  .refine((data) => {
+  .superRefine((data, ctx) => {
     if (!data.channels && !data.channel) {
-      throw new z.ZodError([
-        {
-          code: 'custom',
-          message: 'Either channels or channel is required',
-          path: ['channels'],
-        },
-      ])
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Either channels or channel is required',
+        path: ['channels'],
+      })
     }
-    return true
   })
 
 export type Event = z.infer<typeof eventSchema>
