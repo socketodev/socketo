@@ -5,6 +5,10 @@
   "type": "module",
   "license": "GPL-3.0",
   "homepage": "https://socketo.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/socketodev/socketo"
+  },
   "author": "eckoln",
   "keywords": [
     "pusher",
