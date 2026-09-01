@@ -2,6 +2,10 @@
   "name": "socketo",
   "private": true,
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/socketodev/socketo.git"
+  },
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
