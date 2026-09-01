@@ -88,7 +88,7 @@ export function verifyRestAuth(options: {
   const queryEntries = [...query.entries()]
     .filter(([key]) => key.toLowerCase() !== 'auth_signature')
     .map(([key, val]) => [key.toLowerCase(), val])
-    .sort(([a], [b]) => (a[0] ?? '').localeCompare(b[0] ?? ''))
+    .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, val]) => `${key}=${val}`)
     .join('&')
 

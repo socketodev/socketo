@@ -63,6 +63,40 @@ describe('realtime auth', () => {
     ).toBe(true)
   })
 
+  test('verifies REST requests with out-of-order query parameters', () => {
+    const signed = signRestRequest({
+      method: 'POST',
+      path: '/apps/app-key/events',
+      body: JSON.stringify({ name: 'test', channel: 'my-channel', data: {} }),
+      appKey: 'app-key',
+      appSecret: 'app-secret',
+    })
+
+    const shuffledParams = new URLSearchParams()
+    const authVersion = signed.queryParams.get('auth_version')
+    const authTimestamp = signed.queryParams.get('auth_timestamp')
+    const bodyMd5 = signed.queryParams.get('body_md5')
+    const authKey = signed.queryParams.get('auth_key')
+    const authSignature = signed.queryParams.get('auth_signature')
+
+    if (authVersion) shuffledParams.set('auth_version', authVersion)
+    if (authTimestamp) shuffledParams.set('auth_timestamp', authTimestamp)
+    if (bodyMd5) shuffledParams.set('body_md5', bodyMd5)
+    if (authKey) shuffledParams.set('auth_key', authKey)
+    if (authSignature) shuffledParams.set('auth_signature', authSignature)
+
+    expect(
+      verifyRestAuth({
+        method: 'POST',
+        path: '/apps/app-key/events',
+        query: shuffledParams,
+        body: JSON.stringify({ name: 'test', channel: 'my-channel', data: {} }),
+        appKey: 'app-key',
+        appSecret: 'app-secret',
+      }),
+    ).toBe(true)
+  })
+
   test('rejects an invalid signature', () => {
     expect(
       verifyChannelAuth('socket-1', 'private-room', 'app-key:invalid', policy),
