@@ -1,6 +1,6 @@
 {
   "name": "@socketo/core",
-  "version": "0.0.3",
+  "version": "0.0.6",
   "description": "Internal Pusher-compatible realtime protocol core",
   "private": true,
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@socketo/cli",
-  "version": "0.0.4",
+  "version": "0.0.6",
   "description": "Local Pusher-compatible WebSocket server for development",
   "type": "module",
   "license": "GPL-3.0",
