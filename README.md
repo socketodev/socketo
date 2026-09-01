@@ -292,4 +292,8 @@ The release workflow creates a version pull request and, after it is merged, cre
 
 - **Unconstrained event size:** Server-side event payloads are not capped to 10 KB by default in the self-hosted edition, allowing larger custom payloads. Large WebSocket messages may still hit Cloudflare platform frame limits.
 
-- **Unsupported channel types:** Pusher Cache Channels (`cache-*`, `private-cache-*`, `presence-cache-*`) and End-to-End Encrypted Channels (`private-encrypted-*`) are not supported; subscription attempts are rejected with error code `4300`.
+- **Channel Scope:** Only standard **public**, **private** (`private-*`), and **presence** (`presence-*`) channels are supported. Pusher Cache Channels (`cache-*`, `private-cache-*`, `presence-cache-*`) and End-to-End Encrypted Channels (`private-encrypted-*`) are not supported; subscription attempts are rejected with error code `4300`.
+
+- **Outbound Webhooks:** Outbound event webhook dispatching is not supported in the self-hosted edition.
+
+- **User Watchlist:** Pusher user watchlist events (`pusher:watchlist`) for tracking online/offline status outside of presence channels are not supported.
