@@ -31,6 +31,6 @@
 - Preserve the Durable Object class names and existing migration tags in `apps/server/wrangler.jsonc`; changing them can affect deployed object state.
 - Socket IDs generated across all WebSocket connections follow the official Pusher Channels standard `<int>.<int>` (`generateSocketId()` from `@socketo/core`).
 - REST authentication requires the Pusher auth query parameters (`auth_version=1.0`, `auth_timestamp` within ±600s) and, for POST/PUT/PATCH requests, a matching `body_md5`; see `apps/server/src/api/middlewares/auth-middleware.ts`.
-- `AppHandler` caches app configuration in memory. Changes made through Local Explorer may not affect an active `ServerDO` until it restarts, hibernates, or is redeployed.
+- `ServerDO` loads and caches app configuration in memory in its constructor via `blockConcurrencyWhile`. Changes made through Local Explorer may not affect an active `ServerDO` until it restarts, hibernates, or is redeployed.
 - Keep Worker/runtime-specific code out of reusable protocol logic. `@socketo/core` owns protocol state, socket ID generation, and validation; the Durable Object and CLI packages provide their respective WebSocket adapters.
 - Do not format or lint `apps/server/worker-configuration.d.ts` as ordinary source; regenerate it with Wrangler instead.

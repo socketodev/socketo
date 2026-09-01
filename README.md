@@ -288,7 +288,7 @@ The release workflow creates a version pull request and, after it is merged, cre
 
 ## Known Limitations
 
-- **In-memory config caching:** `AppHandler` caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) in memory after the first database read. If you update an app's configuration via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
+- **In-memory config caching:** `ServerDO` loads and caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) in memory during constructor initialization via `blockConcurrencyWhile`. If you update an app's configuration via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
 
 - **Unconstrained event size:** Server-side event payloads are not capped to 10 KB by default in the self-hosted edition, allowing larger custom payloads. Large WebSocket messages may still hit Cloudflare platform frame limits.
 
