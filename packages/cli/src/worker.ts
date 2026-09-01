@@ -29,6 +29,7 @@ export interface ServerOptions {
   appId?: string
   appKey?: string
   appSecret?: string
+  enableClientEvents?: boolean
   verbose?: boolean
   logger?: Logger
 }
@@ -108,6 +109,7 @@ export class SocketoServer {
   public readonly appId: string
   public readonly appKey: string
   public readonly appSecret: string
+  public readonly startTime: number = Date.now()
   public verbose: boolean
   public logger: Logger
   private readonly namespace: RealtimeNamespace
@@ -137,7 +139,7 @@ export class SocketoServer {
     const policy: AppPolicy = {
       key: this.appKey,
       secret: this.appSecret || this.appKey,
-      enableClientEvents: true,
+      enableClientEvents: options.enableClientEvents ?? true,
     }
 
     const hooks: RealtimeHooks = {
@@ -185,23 +187,34 @@ export class SocketoServer {
 
     // REST Auth Middleware
     app.use('/apps/:id/*', async (c, next) => {
-      const appId = c.req.param('id')
-      if (appKey !== '*' && appId !== appKey) {
+      const appIdParam = c.req.param('id')
+      if (
+        appKey !== '*' &&
+        appIdParam !== this.appKey &&
+        appIdParam !== this.appId
+      ) {
         return c.json({ error: 'Invalid app key' }, 403)
       }
 
       const url = new URL(c.req.url)
       let rawBody: string | undefined
       if (['POST', 'PUT', 'PATCH'].includes(c.req.method)) {
-        rawBody = await c.req.text()
+        const text = await c.req.text()
+        rawBody = text || url.searchParams.has('body_md5') ? text : undefined
       }
+
+      const authKey = url.searchParams.get('auth_key')
+      const targetAppKey =
+        authKey === this.appId || authKey === this.appKey
+          ? authKey
+          : this.appKey
 
       const isValid = verifyRestAuth({
         method: c.req.method,
         path: url.pathname,
         query: url.searchParams,
         body: rawBody,
-        appKey: appId,
+        appKey: targetAppKey,
         appSecret: secret,
       })
 
@@ -618,6 +631,22 @@ export class SocketoServer {
 
   public async terminateUser(userId: string): Promise<void> {
     await this.namespace.terminateUserConnections(userId)
+  }
+
+  public getStartTime(): number {
+    return this.startTime
+  }
+
+  public getSocketCount(): number {
+    return this.namespace.getSocketCount()
+  }
+
+  public getChannelsCount(): number {
+    return this.namespace.getChannelsCount()
+  }
+
+  public getUsersCount(): number {
+    return this.namespace.getUsersCount()
   }
 
   public toggleVerbose(): boolean {

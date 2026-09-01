@@ -9,6 +9,7 @@ describe('REPL Commands', () => {
     expect(commandNames).toContain('/presence')
     expect(commandNames).toContain('/sockets')
     expect(commandNames).toContain('/terminate')
+    expect(commandNames).toContain('/info')
     expect(commandNames).toContain('/verbose')
     expect(commandNames).toContain('/clear')
     expect(commandNames).toContain('/help')
@@ -23,5 +24,9 @@ describe('REPL Commands', () => {
     const channelsCmd = COMMANDS.find((c) => c.name === '/channels')
     expect(channelsCmd?.aliases).toContain('/c')
     expect(channelsCmd?.aliases).toContain('/list')
+
+    const infoCmd = COMMANDS.find((c) => c.name === '/info')
+    expect(infoCmd?.aliases).toContain('/status')
+    expect(infoCmd?.aliases).toContain('/i')
   })
 })
