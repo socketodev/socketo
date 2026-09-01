@@ -22,6 +22,9 @@ Commands:
   subscribe <channel>          Subscribe to a channel and watch live events
   trigger <ch> <event> [data]  Trigger an event on a channel via REST
   info                         Show server status and active channels
+  sockets                      Show active WebSocket connections count
+  presence <channel>           Show active users in a presence channel
+  terminate <user_id>          Terminate all connections for a user
   generate                     Generate client/server code with prefilled keys
   help                         Show this help message
 
@@ -32,10 +35,22 @@ Options:
   -k, --app-key <key>          Pusher App Key (default: local)
   -s, --app-secret <secret>    Pusher App Secret for auth validation
   -v, --verbose                Log detailed event payloads and socket activity
+  --disable-client-events      Disable client-triggered events (client-*)
   --socket-id <id>             Exclude socket from broadcast (trigger)
   --user-id <id>               User ID for presence channels (subscribe)
   --presence                   Include presence data (subscribe)
+  -h, --help                   Show this help message
 ```
+
+### Environment Variables
+
+You can also configure default credentials via environment variables:
+
+| Variable | Description | Default |
+|---|---|---|
+| `SOCKETO_APP_ID` | Pusher App ID | Matches `SOCKETO_APP_KEY` |
+| `SOCKETO_APP_KEY` | Pusher App Key | `local` |
+| `SOCKETO_APP_SECRET` | Pusher App Secret | Matches `SOCKETO_APP_KEY` |
 
 ### Client SDK
 
@@ -90,6 +105,9 @@ Interactive Commands (Type / to filter, Tab to complete):
   /terminate <user_id>               (alias: /kick)
     Terminate all connections for a user
 
+  /info                              (alias: /status, /i)
+    Show server status, active connections, and uptime
+
   /verbose                           (alias: /v)
     Toggle live verbose payload logging on / off
 
@@ -130,6 +148,30 @@ Show server status and active channels:
 socketo info
 ```
 
+### `socketo sockets`
+
+Show active WebSocket connection count:
+
+```bash
+socketo sockets
+```
+
+### `socketo presence <channel>`
+
+Show active members in a presence channel:
+
+```bash
+socketo presence presence-chat
+```
+
+### `socketo terminate <user_id>`
+
+Terminate all active connections for a user:
+
+```bash
+socketo terminate user-1
+```
+
 ### `socketo generate`
 
 Generate client/server boilerplate code with prefilled keys:
@@ -140,11 +182,16 @@ socketo generate
 
 ## Supported
 
+**Channels**
+- Public channels (`<name>`)
+- Private channels (`private-<name>`) with HMAC SHA-256 signature verification
+- Presence channels (`presence-<name>`) with `user_id` and `user_info` lifecycle
+
 **WebSocket Protocol**
 - `pusher:connection_established` handshake (with `socket_id` and `activity_timeout: 120`)
 - Subscribe / unsubscribe (public, private, presence)
 - Client events (`client-*`)
-- Ping / pong
+- Ping / pong with activity timeout
 - User signin (`pusher:signin` / `pusher:signin_success`)
 - Auth signature validation (when `--app-secret` is set)
 
@@ -157,20 +204,20 @@ socketo generate
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/apps/local/sockets` | Active socket count |
-| `POST` | `/apps/local/events` | Trigger events (single or multi-channel) |
-| `POST` | `/apps/local/batch_events` | Batch trigger (max 10 events) |
-| `POST` | `/apps/local/auth` | Auth endpoint for private/presence channels |
-| `GET` | `/apps/local/channels` | List channels |
-| `GET` | `/apps/local/channels/{name}` | Channel info |
-| `GET` | `/apps/local/channels/{name}/users` | Presence users |
-| `POST` | `/apps/local/users/{id}/terminate_connections` | Disconnect user |
+| `GET` | `/apps/:id/sockets` | Active socket count |
+| `POST` | `/apps/:id/events` | Trigger events (single or multi-channel) |
+| `POST` | `/apps/:id/batch_events` | Batch trigger (max 10 events) |
+| `POST` | `/apps/:id/auth` | Auth endpoint for private/presence channels |
+| `GET` | `/apps/:id/channels` | List channels |
+| `GET` | `/apps/:id/channels/:name` | Channel info |
+| `GET` | `/apps/:id/channels/:name/users` | Presence users |
+| `POST` | `/apps/:id/users/:user_id/terminate_connections` | Disconnect user |
 
 Query params: `?filter_by_prefix=` and `?info=user_count,subscription_count`.
 
 **State**
 
-Connection state survives indefinitely (no hibernation). Channels, members, and user data persist across requests.
+Connection state survives indefinitely in-memory. Channels, members, and user data persist across requests.
 
 **CORS**
 
@@ -178,7 +225,8 @@ All HTTP endpoints return `Access-Control-Allow-Origin: *`.
 
 ## Not Supported
 
-- Cache channels (`cache-*`, `private-cache-*`)
-- TLS / WSS termination (local plain HTTP/WS development only)
+- Outbound webhooks
+- Encrypted channels (`private-encrypted-*`)
+- Cache channels (`cache-*`, `private-cache-*`, `presence-cache-*`)
 - Watchlist events
-- Server-initiated ping (client-initiated ping/pong is supported)
+- TLS / WSS termination (local plain HTTP/WS development only)

@@ -276,20 +276,14 @@ bun run --filter=@socketo/server deploy
 
 After deployment, configure `ADMIN_API_TOKEN` and run the production migration steps in [Deployment](#deployment) before accessing `DatabaseDO` through Data Studio.
 
-## Releases
-
-Add a changeset for each releasable change:
-
-```bash
-bun run changeset
-```
-
-The release workflow creates a version pull request and, after it is merged, creates Git tags without GitHub Releases. `@socketo/server` is versioned and tagged as a private package but is never published to npm. `@socketo/cli` is versioned, tagged, and published to npm. `@socketo/core` is not independently versioned; include the affected server or CLI package in a changeset when a core change requires a release.
-
 ## Known Limitations
 
-- **In-memory config caching:** `AppHandler` caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) in memory after the first database read. If you update an app's configuration via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
+- **In-memory config caching:** `ServerDO` loads and caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) in memory during constructor initialization via `blockConcurrencyWhile`. If you update an app's configuration via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
 
 - **Unconstrained event size:** Server-side event payloads are not capped to 10 KB by default in the self-hosted edition, allowing larger custom payloads. Large WebSocket messages may still hit Cloudflare platform frame limits.
 
-- **Unsupported channel types:** Pusher Cache Channels (`cache-*`, `private-cache-*`, `presence-cache-*`) and End-to-End Encrypted Channels (`private-encrypted-*`) are not supported; subscription attempts are rejected with error code `4300`.
+- **Channel Scope:** Only standard **public**, **private** (`private-*`), and **presence** (`presence-*`) channels are supported. Pusher Cache Channels (`cache-*`, `private-cache-*`, `presence-cache-*`) and End-to-End Encrypted Channels (`private-encrypted-*`) are not supported; subscription attempts are rejected with error code `4300`.
+
+- **Outbound Webhooks:** Outbound event webhook dispatching is not supported in the self-hosted edition.
+
+- **User Watchlist:** Pusher user watchlist events (`pusher:watchlist`) for tracking online/offline status outside of presence channels are not supported.

@@ -57,6 +57,9 @@ Commands:
   subscribe <channel> [options]     Subscribe to a channel and watch live events
   trigger <channel> <event> [data]  Trigger an event on a channel via REST
   info [options]                    Show server status and active channels
+  sockets [options]                 Show active WebSocket connections count
+  presence <channel> [options]      Show active users in a presence channel
+  terminate <user_id> [options]     Terminate all connections for a user
   generate                          Generate client/server code snippets
   help                              Show this help message
 
@@ -67,6 +70,7 @@ Options:
   -k, --app-key <key>               Pusher App Key (default: ${DEFAULT_APP_KEY})
   -s, --app-secret <secret>         Pusher App Secret for auth validation
   -v, --verbose                     Log detailed event payloads and socket activity
+  --disable-client-events           Disable client-triggered events (client-*)
   --socket-id <id>                  Exclude socket from broadcast (trigger)
   --user-id <id>                    User ID for presence channels (subscribe)
   --presence                        Include presence data (subscribe)
@@ -122,6 +126,7 @@ async function cmdStart(
   appId: string,
   appKey: string,
   appSecret: string,
+  enableClientEvents: boolean,
   verbose: boolean,
 ) {
   const server = new SocketoServer({
@@ -130,6 +135,7 @@ async function cmdStart(
     appId,
     appKey,
     appSecret: appSecret || undefined,
+    enableClientEvents,
     verbose,
   })
 
@@ -379,6 +385,135 @@ async function cmdInfo(
   }
 }
 
+async function cmdSockets(
+  host: string,
+  port: number,
+  appKey: string,
+  appSecret: string,
+) {
+  const httpHost = host === '0.0.0.0' ? 'localhost' : host
+  try {
+    const res = await restRequest(
+      httpHost,
+      port,
+      `/apps/${appKey}/sockets`,
+      appKey,
+      {
+        secret: appSecret,
+      },
+    )
+    if (!res.ok) {
+      console.error(`Error: Could not reach server at port ${port}`)
+      console.error('Is the server running? Start it with: socketo start')
+      process.exit(1)
+    }
+
+    // SAFETY: /apps/:id/sockets endpoint returns { sockets: number } JSON structure.
+    const body = (await res.json()) as { sockets: number }
+    console.log(`
+  Active Sockets: ${body.sockets}
+`)
+  } catch {
+    console.error(`Error: Could not reach server at port ${port}`)
+    console.error('Is the server running? Start it with: socketo start')
+    process.exit(1)
+  }
+}
+
+async function cmdPresence(
+  channel: string | undefined,
+  host: string,
+  port: number,
+  appKey: string,
+  appSecret: string,
+) {
+  if (!channel) {
+    console.error('Error: Channel name is required')
+    console.log('Usage: socketo presence <presence-channel>')
+    process.exit(1)
+  }
+  if (!channel.startsWith('presence-')) {
+    console.error('Error: Presence channel name must start with presence-')
+    process.exit(1)
+  }
+
+  const httpHost = host === '0.0.0.0' ? 'localhost' : host
+  try {
+    const res = await restRequest(
+      httpHost,
+      port,
+      `/apps/${appKey}/channels/${channel}/users`,
+      appKey,
+      {
+        secret: appSecret,
+      },
+    )
+    if (!res.ok) {
+      const text = await res.text()
+      console.error(`Error: ${res.status} ${text}`)
+      process.exit(1)
+    }
+
+    // SAFETY: Presence users endpoint returns { users: Array<{ id: string }> } format.
+    const body = (await res.json()) as { users: Array<{ id: string }> }
+    const users = body.users || []
+    console.log(`
+  Presence Members for '${channel}' (${users.length}):
+`)
+    if (users.length > 0) {
+      for (const u of users) {
+        console.log(`    👤 ${u.id}`)
+      }
+    } else {
+      console.log('    No active members.')
+    }
+    console.log('')
+  } catch {
+    console.error(`Error: Could not reach server at port ${port}`)
+    console.error('Is the server running? Start it with: socketo start')
+    process.exit(1)
+  }
+}
+
+async function cmdTerminate(
+  userId: string | undefined,
+  host: string,
+  port: number,
+  appKey: string,
+  appSecret: string,
+) {
+  if (!userId) {
+    console.error('Error: User ID is required')
+    console.log('Usage: socketo terminate <user_id>')
+    process.exit(1)
+  }
+
+  const httpHost = host === '0.0.0.0' ? 'localhost' : host
+  try {
+    const res = await restRequest(
+      httpHost,
+      port,
+      `/apps/${appKey}/users/${userId}/terminate_connections`,
+      appKey,
+      {
+        method: 'POST',
+        secret: appSecret,
+      },
+    )
+    if (res.ok) {
+      console.log(`  Terminated all connections for user '${userId}'`)
+    } else {
+      const text = await res.text()
+      console.error(`Error: ${res.status} ${text}`)
+      process.exit(1)
+    }
+  } catch {
+    console.error(`Error: Could not reach server at port ${port}`)
+    console.error('Is the server running? Start it with: socketo start')
+    process.exit(1)
+  }
+}
+
 function cmdGenerate(host: string, port: number, appKey: string) {
   const displayHost = host === '0.0.0.0' ? 'localhost' : host
   console.log(`
@@ -431,6 +566,7 @@ const parsed = parseArgs({
     'socket-id': { type: 'string' },
     'user-id': { type: 'string' },
     presence: { type: 'boolean' },
+    'disable-client-events': { type: 'boolean' },
     verbose: { type: 'boolean', short: 'v' },
     help: { type: 'boolean', short: 'h' },
   },
@@ -459,6 +595,7 @@ const userId = isStringValue(parsed.values['user-id'])
   ? parsed.values['user-id']
   : 'user-1'
 const isPresence = parsed.values.presence === true
+const enableClientEvents = parsed.values['disable-client-events'] !== true
 const verbose = parsed.values.verbose === true
 
 const KNOWN_COMMANDS = new Set([
@@ -466,6 +603,9 @@ const KNOWN_COMMANDS = new Set([
   'subscribe',
   'trigger',
   'info',
+  'sockets',
+  'presence',
+  'terminate',
   'generate',
   'help',
 ])
@@ -482,7 +622,15 @@ const channelArg = command === 'start' ? rawCommand : parsed.positionals[1]
 
 switch (command) {
   case 'start':
-    await cmdStart(host, port, appId, appKey, appSecret, verbose)
+    await cmdStart(
+      host,
+      port,
+      appId,
+      appKey,
+      appSecret,
+      enableClientEvents,
+      verbose,
+    )
     break
   case 'subscribe':
     await cmdSubscribe(
@@ -509,6 +657,15 @@ switch (command) {
     break
   case 'info':
     await cmdInfo(host, port, appKey, appSecret)
+    break
+  case 'sockets':
+    await cmdSockets(host, port, appKey, appSecret)
+    break
+  case 'presence':
+    await cmdPresence(parsed.positionals[1], host, port, appKey, appSecret)
+    break
+  case 'terminate':
+    await cmdTerminate(parsed.positionals[1], host, port, appKey, appSecret)
     break
   case 'generate':
     cmdGenerate(host, port, appKey)

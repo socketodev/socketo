@@ -5,15 +5,11 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "changeset": "changeset",
-    "version-packages": "changeset version && bun install --lockfile-only",
-    "release": "changeset publish",
     "publish:cli": "turbo run build && cd packages/cli && npm publish --access public",
     "pack:cli:test": "turbo run build && cd packages/cli && npm pack --dry-run"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.14",
-    "@changesets/cli": "^3.0.1",
     "@oxlint/plugins": "1.80.0",
     "oxlint": "1.80.0",
     "turbo": "^2.9.7",

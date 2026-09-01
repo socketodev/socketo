@@ -50,6 +50,12 @@ export const COMMANDS: CommandDef[] = [
     description: 'Terminate all connections for a user',
   },
   {
+    name: '/info',
+    aliases: ['/status', '/i'],
+    usage: '/info',
+    description: 'Show server status, active connections, and uptime',
+  },
+  {
     name: '/verbose',
     aliases: ['/v'],
     usage: '/verbose',
@@ -198,6 +204,31 @@ async function handleTerminate(
   } catch (err) {
     console.log(`${RED}Failed to terminate user: ${err}${RESET}`)
   }
+}
+
+function handleInfo(server: SocketoServer) {
+  const displayHost = server.host === '0.0.0.0' ? 'localhost' : server.host
+  const uptimeSec = Math.floor((Date.now() - server.getStartTime()) / 1000)
+  const hours = Math.floor(uptimeSec / 3600)
+  const mins = Math.floor((uptimeSec % 3600) / 60)
+  const secs = uptimeSec % 60
+  const uptimeStr =
+    hours > 0
+      ? `${hours}h ${mins}m ${secs}s`
+      : mins > 0
+        ? `${mins}m ${secs}s`
+        : `${secs}s`
+
+  console.log(`
+${PRIMARY_BOLD}Server Status:${RESET}
+  ${DIM}Host / Port:${RESET}    ws://${displayHost}:${server.port}
+  ${DIM}App Key:${RESET}        ${server.appKey}
+  ${DIM}App ID:${RESET}         ${server.appId}
+  ${DIM}Sockets:${RESET}        ${server.getSocketCount()} active
+  ${DIM}Channels:${RESET}       ${server.getChannelsCount()} active
+  ${DIM}Users:${RESET}          ${server.getUsersCount()} unique
+  ${DIM}Uptime:${RESET}         ${uptimeStr}
+`)
 }
 
 function completer(line: string): [string[], string] {
@@ -370,6 +401,11 @@ export function startInteractiveRepl(
         case 'terminate':
         case 'kick':
           await handleTerminate(server, args[0])
+          break
+        case 'info':
+        case 'status':
+        case 'i':
+          handleInfo(server)
           break
         case 'verbose':
         case 'v': {

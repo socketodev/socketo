@@ -7,15 +7,12 @@ import type { BatchEvent, Event } from '../api/schemas/apps'
 import type { App } from '../database/types'
 import type { ConnectionManager } from '../managers/connection-manager'
 import { isAttachmentData } from '../types'
-import type { AppHandler } from './app-handler'
-
 export class WebSocketHandler {
   private namespace: RealtimeNamespace | undefined
 
   constructor(
     private ctx: DurableObjectState,
     private connections: ConnectionManager,
-    private app: AppHandler,
   ) {
     ctx.setWebSocketAutoResponse(
       new WebSocketRequestResponsePair(
@@ -23,10 +20,6 @@ export class WebSocketHandler {
         JSON.stringify({ event: 'pusher:pong', data: {} }),
       ),
     )
-
-    ctx.blockConcurrencyWhile(async () => {
-      this.connections.restore()
-    })
   }
 
   public configure(config: App): RealtimeNamespace {
@@ -34,32 +27,6 @@ export class WebSocketHandler {
 
     if (!this.namespace) {
       this.namespace = new RealtimeNamespace(policy)
-
-      for (const ws of this.connections.getSockets()) {
-        const snapshot = ws.deserializeAttachment()
-        if (!isAttachmentData(snapshot)) {
-          this.connections.remove(ws)
-          try {
-            ws.close(1002, 'Invalid connection state')
-          } catch {
-            // The socket may already be closed.
-          }
-          continue
-        }
-        const session: SessionSnapshot = {
-          id: snapshot.id,
-          channels: [...snapshot.channels],
-        }
-        if (snapshot.user_id) session.userId = snapshot.user_id
-        if (snapshot.user_info) session.userInfo = snapshot.user_info
-        if (snapshot.presence_user_id) {
-          session.presenceUserId = snapshot.presence_user_id
-        }
-        if (snapshot.presence_user_info) {
-          session.presenceUserInfo = snapshot.presence_user_info
-        }
-        this.namespace.restore(this.connections.toConnection(ws), session)
-      }
     } else {
       this.namespace.updatePolicy(policy)
     }
@@ -67,29 +34,58 @@ export class WebSocketHandler {
     return this.namespace
   }
 
-  public async getNamespace(): Promise<RealtimeNamespace> {
-    const config = await this.app.getConfig(this.ctx.id.name)
-    if (!config) throw new Error(`App not found for key: ${this.ctx.id.name}`)
-    return this.configure(config)
+  public restore() {
+    const namespace = this.getNamespace()
+    this.connections.restore()
+
+    for (const ws of this.connections.getSockets()) {
+      const snapshot = ws.deserializeAttachment()
+      if (!isAttachmentData(snapshot)) {
+        this.connections.remove(ws)
+        try {
+          ws.close(1002, 'Invalid connection state')
+        } catch {
+          // The socket may already be closed.
+        }
+        continue
+      }
+      const session: SessionSnapshot = {
+        id: snapshot.id,
+        channels: [...snapshot.channels],
+      }
+      if (snapshot.user_id) session.userId = snapshot.user_id
+      if (snapshot.user_info) session.userInfo = snapshot.user_info
+      if (snapshot.presence_user_id) {
+        session.presenceUserId = snapshot.presence_user_id
+      }
+      if (snapshot.presence_user_info) {
+        session.presenceUserInfo = snapshot.presence_user_info
+      }
+      namespace.restore(this.connections.toConnection(ws), session)
+    }
+  }
+
+  public getNamespace(): RealtimeNamespace {
+    if (!this.namespace) {
+      throw new Error(`App not found for key: ${this.ctx.id.name}`)
+    }
+    return this.namespace
   }
 
   public register(ws: WebSocket) {
-    if (!this.namespace) {
-      throw new Error('WebSocket namespace is not configured')
-    }
-
+    const namespace = this.getNamespace()
     const connection = this.connections.toConnection(ws)
-    this.namespace.connect(connection)
-    const snapshot = this.namespace.getSession(connection.id)
+    namespace.connect(connection)
+    const snapshot = namespace.getSession(connection.id)
     if (!snapshot || !this.connections.syncSession(ws, snapshot)) {
       this.connections.remove(ws)
-      void this.namespace.disconnect(connection.id)
+      void namespace.disconnect(connection.id)
       ws.close(4200, 'Connection state too large')
     }
   }
 
   public async handleMessage(ws: WebSocket, message: string) {
-    const namespace = await this.getNamespace()
+    const namespace = this.getNamespace()
     const attachment = ws.deserializeAttachment()
     if (!isAttachmentData(attachment)) {
       const socketId = this.connections.remove(ws)
@@ -122,41 +118,34 @@ export class WebSocketHandler {
     try {
       if (this.namespace) {
         await this.namespace.disconnect(snapshot.id)
-      } else if (snapshot.channels.size > 0) {
-        await (await this.getNamespace()).disconnect(snapshot.id)
       }
     } finally {
       this.connections.remove(ws)
     }
   }
 
-  public async trigger(payload: Event) {
-    const namespace = await this.getNamespace()
-    return namespace.trigger(payload)
+  public trigger(payload: Event) {
+    return this.getNamespace().trigger(payload)
   }
 
-  public async triggerBatch(payload: BatchEvent) {
-    const namespace = await this.getNamespace()
-    return namespace.triggerBatch(payload)
+  public triggerBatch(payload: BatchEvent) {
+    return this.getNamespace().triggerBatch(payload)
   }
 
-  public async queryChannels(options?: {
-    filterByPrefix?: string
-    info?: string
-  }) {
-    return (await this.getNamespace()).queryChannels(options)
+  public queryChannels(options?: { filterByPrefix?: string; info?: string }) {
+    return this.getNamespace().queryChannels(options)
   }
 
-  public async queryChannel(channel: string, options?: { info?: string }) {
-    return (await this.getNamespace()).queryChannel(channel, options)
+  public queryChannel(channel: string, options?: { info?: string }) {
+    return this.getNamespace().queryChannel(channel, options)
   }
 
-  public async queryChannelUsers(channel: string) {
-    return (await this.getNamespace()).queryChannelUsers(channel)
+  public queryChannelUsers(channel: string) {
+    return this.getNamespace().queryChannelUsers(channel)
   }
 
   public async terminateUserConnections(userId: string) {
-    await (await this.getNamespace()).terminateUserConnections(userId)
+    await this.getNamespace().terminateUserConnections(userId)
   }
 
   public getSocketCount() {
