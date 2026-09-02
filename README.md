@@ -114,6 +114,7 @@ All endpoints under `/apps/:key/*` require Pusher REST API authentication (HMAC-
 | `POST` | `/apps/:key/events` | Pusher REST Auth | Trigger a single event |
 | `POST` | `/apps/:key/batch_events` | Pusher REST Auth | Trigger multiple events |
 | `POST` | `/apps/:key/users/:user_id/terminate_connections` | Pusher REST Auth | Terminate all connections for a specific user |
+| `POST` | `/apps/:key/users/:user_id/events` | Pusher REST Auth | Deliver event directly to an authenticated user connection (`pusher.user.bind`) |
 
 ### REST API Authentication
 
