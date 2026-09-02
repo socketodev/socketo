@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  isStringValue,
   type JsonObject,
   type RealtimeConnection,
   RealtimeNamespace,
@@ -469,6 +470,162 @@ describe('RealtimeNamespace', () => {
 
     const nonExistent = namespace.queryChannel('unknown')
     expect(nonExistent).toBeNull()
+  })
+
+  test('sendToUser delivers events directly to user connections without creating channels', async () => {
+    const namespace = new RealtimeNamespace(policy)
+    const conn1 = new TestConnection('socket-tab-1')
+    const conn2 = new TestConnection('socket-tab-2')
+    const connOther = new TestConnection('socket-other')
+
+    namespace.connect(conn1)
+    namespace.connect(conn2)
+    namespace.connect(connOther)
+
+    await signIn(namespace, conn1, 'user-target', { name: 'Target' })
+    await signIn(namespace, conn2, 'user-target', { name: 'Target' })
+    await signIn(namespace, connOther, 'user-other', { name: 'Other' })
+
+    const connPresenceOnly = new TestConnection('socket-presence-only')
+    namespace.connect(connPresenceOnly)
+    await subscribePresence(namespace, connPresenceOnly, 'user-target', {
+      name: 'PresenceOnly',
+    })
+
+    const result = await namespace.sendToUser(
+      'user-target',
+      'order-notification',
+      {
+        orderId: 'ord_123',
+        status: 'shipped',
+      },
+    )
+
+    // Sent only to the 2 authenticated signed-in sockets (conn1, conn2), NOT connPresenceOnly
+    expect(result.sent).toBe(2)
+    expect(conn1.takeLast('order-notification')).toEqual({
+      event: 'order-notification',
+      channel: '#server-to-user-user-target',
+      data: '{"orderId":"ord_123","status":"shipped"}',
+    })
+    expect(conn2.takeLast('order-notification')).toEqual({
+      event: 'order-notification',
+      channel: '#server-to-user-user-target',
+      data: '{"orderId":"ord_123","status":"shipped"}',
+    })
+    expect(connOther.takeLast('order-notification')).toBeUndefined()
+    expect(connPresenceOnly.takeLast('order-notification')).toBeUndefined()
+
+    // Test trigger on #server-to-user-<user_id> directly
+    const triggerRes = await namespace.trigger({
+      channel: '#server-to-user-user-target',
+      name: 'direct-trigger-test',
+      data: { hello: 'world' },
+    })
+    expect(triggerRes.recipientCount).toBe(2)
+    expect(conn1.takeLast('direct-trigger-test')).toEqual({
+      event: 'direct-trigger-test',
+      channel: '#server-to-user-user-target',
+      data: '{"hello":"world"}',
+    })
+    expect(
+      connPresenceOnly.takeLast('direct-trigger-test'),
+    ).toBeUndefined()
+
+    // Test subscribing to #server-to-user channel
+    await namespace.receive(
+      conn1.id,
+      JSON.stringify({
+        event: 'pusher:subscribe',
+        data: { channel: '#server-to-user-user-target' },
+      }),
+    )
+    expect(
+      conn1.takeLast('pusher_internal:subscription_succeeded'),
+    ).toBeDefined()
+
+    // Test subscribing to wrong user's server-to-user channel fails
+    await namespace.receive(
+      connOther.id,
+      JSON.stringify({
+        event: 'pusher:subscribe',
+        data: { channel: '#server-to-user-user-target' },
+      }),
+    )
+    const err = connOther.takeLast('pusher:error')
+    expect(err).toBeDefined()
+    // SAFETY: pusher:error data payload is a JSON string.
+    const errData = JSON.parse(err?.data as string)
+    expect(errData).toEqual({
+      code: 4009,
+      message: 'User not signed in or user ID mismatch',
+    })
+
+    // Test that presence-only socket cannot subscribe to #server-to-user channel without signin
+    await namespace.receive(
+      connPresenceOnly.id,
+      JSON.stringify({
+        event: 'pusher:subscribe',
+        data: { channel: '#server-to-user-user-target' },
+      }),
+    )
+    const errPresence = connPresenceOnly.takeLast('pusher:error')
+    expect(errPresence).toBeDefined()
+    // SAFETY: errPresence.data is a JSON-encoded string from pusher:error frame.
+    const errPresenceData = JSON.parse(errPresence?.data as string)
+    expect(errPresenceData).toEqual({
+      code: 4009,
+      message: 'User not signed in or user ID mismatch',
+    })
+  })
+
+  test('handles __proto__ as presence user_id and channel name safely without polluting Object prototype', async () => {
+    const namespace = new RealtimeNamespace(policy)
+    const connection = new TestConnection('socket-proto')
+    namespace.connect(connection)
+
+    await subscribePresence(namespace, connection, '__proto__', {
+      role: 'special',
+    })
+
+    const succeeded = connection.takeLast(
+      'pusher_internal:subscription_succeeded',
+    )
+    expect(succeeded).toBeDefined()
+    expect(isStringValue(succeeded?.data)).toBe(true)
+
+    // SAFETY: succeeded.data is a JSON-encoded string from subscription_succeeded.
+    const parsed = JSON.parse(succeeded!.data as string)
+    expect(parsed.presence.ids).toEqual(['__proto__'])
+    expect(parsed.presence.count).toBe(1)
+    expect(parsed.presence.hash['__proto__']).toEqual({ role: 'special' })
+
+    // Also test __proto__ public channel in queryChannels and trigger info
+    const connProtoChan = new TestConnection('socket-proto-chan')
+    namespace.connect(connProtoChan)
+    await namespace.receive(
+      'socket-proto-chan',
+      JSON.stringify({
+        event: 'pusher:subscribe',
+        data: { channel: '__proto__' },
+      }),
+    )
+
+    const query = namespace.queryChannels({ info: 'subscription_count' })
+    expect(query.channels['__proto__']).toEqual({ subscription_count: 1 })
+
+    const triggerRes = await namespace.trigger({
+      channel: '__proto__',
+      name: 'test-event',
+      data: { ok: true },
+      info: 'subscription_count',
+    })
+    expect(triggerRes.channels?.['__proto__']).toEqual({
+      subscription_count: 1,
+    })
+
+    // Verify Object prototype was not corrupted
+    expect('role' in Object.prototype).toBe(false)
   })
 })
 

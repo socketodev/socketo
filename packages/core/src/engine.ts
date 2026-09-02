@@ -29,6 +29,7 @@ import {
   isPresenceChannel,
   isProtectedChannel,
   isRecord,
+  isServerToUserChannel,
   isUnsupportedChannel,
   isValidChannelName,
   isValidEventName,
@@ -237,6 +238,16 @@ export class RealtimeNamespace {
     let recipientCount = 0
 
     for (const channel of channels) {
+      if (isServerToUserChannel(channel)) {
+        const targetUserId = channel.slice('#server-to-user-'.length)
+        const res = await this.sendToUser(
+          targetUserId,
+          payload.name,
+          payload.data,
+        )
+        recipientCount += res.sent
+        continue
+      }
       recipientCount += await this.broadcast({
         channel,
         event: payload.name,
@@ -250,11 +261,12 @@ export class RealtimeNamespace {
       const includeUserCount = requested.includes('user_count')
       const includeSubscriptionCount = requested.includes('subscription_count')
 
-      const result: Record<string, Record<string, number>> = {}
+      const result: Record<string, Record<string, number>> =
+        Object.create(null)
 
       for (const channel of channels) {
         const occ = this.getChannel(channel)
-        const attrs: Record<string, number> = {}
+        const attrs: Record<string, number> = Object.create(null)
         if (occ) {
           if (includeUserCount && channel.startsWith('presence-')) {
             attrs.user_count = occ.user_count
@@ -263,7 +275,12 @@ export class RealtimeNamespace {
             attrs.subscription_count = occ.subscription_count
           }
         }
-        result[channel] = attrs
+        Object.defineProperty(result, channel, {
+          value: attrs,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        })
       }
 
       return { recipientCount, channels: result }
@@ -276,6 +293,11 @@ export class RealtimeNamespace {
     payload: BatchEventPayload,
   ): Promise<BatchTriggerResult> {
     for (const item of payload.batch) {
+      if (isServerToUserChannel(item.channel)) {
+        const targetUserId = item.channel.slice('#server-to-user-'.length)
+        await this.sendToUser(targetUserId, item.name, item.data)
+        continue
+      }
       await this.broadcast({
         channel: item.channel,
         event: item.name,
@@ -292,7 +314,7 @@ export class RealtimeNamespace {
       const includeSubscriptionCount = requested.includes('subscription_count')
 
       const occ = this.getChannel(item.channel)
-      const attrs: Record<string, number> = {}
+      const attrs: Record<string, number> = Object.create(null)
       if (occ) {
         if (includeUserCount && item.channel.startsWith('presence-')) {
           attrs.user_count = occ.user_count
@@ -403,9 +425,10 @@ export class RealtimeNamespace {
       requestedAttrs.includes('subscription_count')
     const filterByPrefix = options?.filterByPrefix
 
-    const result: Record<string, ChannelAttributes> = {}
+    const result: Record<string, ChannelAttributes> = Object.create(null)
 
     for (const [channel, sockets] of this.channels) {
+      if (isServerToUserChannel(channel)) continue
       if (filterByPrefix && !channel.startsWith(filterByPrefix)) continue
 
       const attrs: ChannelAttributes = {}
@@ -416,7 +439,12 @@ export class RealtimeNamespace {
         attrs.user_count = this.getMemberCount(channel)
       }
 
-      result[channel] = attrs
+      Object.defineProperty(result, channel, {
+        value: attrs,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      })
     }
 
     return { channels: result } satisfies ChannelsQueryResponse
@@ -469,6 +497,39 @@ export class RealtimeNamespace {
         }
       }),
     )
+  }
+
+  public async sendToUser(
+    userId: string,
+    event: string,
+    data: JsonValue,
+  ): Promise<{ sent: number }> {
+    const socketIds = this.getUserSocketIds(userId)
+    if (socketIds.length === 0) {
+      return { sent: 0 }
+    }
+
+    const outgoing: OutgoingMessage = {
+      event,
+      channel: `#server-to-user-${userId}`,
+      data: serializeData(data),
+    }
+    const message = serializeMessage(outgoing)
+    let sent = 0
+
+    for (const socketId of socketIds) {
+      const session = this.sessions.get(socketId)
+      if (session && !session.disconnecting) {
+        try {
+          session.connection.send(message)
+          sent++
+        } catch {
+          // Socket may already be closed
+        }
+      }
+    }
+
+    return { sent }
   }
 
   private async handleSignin(
@@ -582,6 +643,22 @@ export class RealtimeNamespace {
     }
 
     if (session.channels.has(channel)) {
+      this.sendSubscriptionSucceeded(connection, channel)
+      return
+    }
+
+    if (isServerToUserChannel(channel)) {
+      const targetUserId = channel.slice('#server-to-user-'.length)
+      if (!session.userId || session.userId !== targetUserId) {
+        this.sendError(
+          connection,
+          4009,
+          'User not signed in or user ID mismatch',
+          channel,
+        )
+        return
+      }
+
       this.sendSubscriptionSucceeded(connection, channel)
       return
     }
@@ -922,21 +999,22 @@ export class RealtimeNamespace {
 
   private getUserSocketIds(userId: string) {
     return [...this.sessions.values()]
-      .filter(
-        (session) =>
-          session.userId === userId ||
-          [...session.presenceUserId.values()].includes(userId),
-      )
+      .filter((session) => session.userId === userId)
       .map((session) => session.id)
   }
 
   private getPresenceData(channel: string): PresenceData {
     const users = this.presenceUsers.get(channel)
-    const hash: Record<string, UserInfo> = {}
+    const hash: Record<string, UserInfo> = Object.create(null)
     const ids = [...(users?.keys() ?? [])]
 
     for (const userId of ids) {
-      hash[userId] = users?.get(userId)?.userInfo ?? {}
+      Object.defineProperty(hash, userId, {
+        value: users?.get(userId)?.userInfo ?? {},
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      })
     }
 
     return { presence: { ids, hash, count: ids.length } }

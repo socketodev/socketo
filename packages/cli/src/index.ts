@@ -182,7 +182,7 @@ async function cmdSubscribe(
       const msg = JSON.parse(String(event.data)) as {
         event: string
         channel?: string
-        data?: unknown
+        data?: JsonValue
         user_id?: string
       }
       const timeStr = new Date().toLocaleTimeString()
@@ -634,7 +634,7 @@ switch (command) {
     break
   case 'subscribe':
     await cmdSubscribe(
-      channelArg,
+      channelArg || '',
       host,
       port,
       appKey,
@@ -645,8 +645,8 @@ switch (command) {
     break
   case 'trigger':
     await cmdTrigger(
-      parsed.positionals[1],
-      parsed.positionals[2],
+      parsed.positionals[1] || '',
+      parsed.positionals[2] || '',
       parsed.positionals[3],
       host,
       port,

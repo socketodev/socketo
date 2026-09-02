@@ -1,5 +1,6 @@
 import {
   type AppPolicy,
+  type JsonValue,
   RealtimeNamespace,
   type SessionSnapshot,
 } from '@socketo/core'
@@ -146,6 +147,14 @@ export class WebSocketHandler {
 
   public async terminateUserConnections(userId: string) {
     await this.getNamespace().terminateUserConnections(userId)
+  }
+
+  public async sendToUser(
+    userId: string,
+    event: string,
+    data: JsonValue,
+  ): Promise<{ sent: number }> {
+    return this.getNamespace().sendToUser(userId, event, data)
   }
 
   public getSocketCount() {

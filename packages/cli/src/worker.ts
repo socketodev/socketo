@@ -479,6 +479,20 @@ export class SocketoServer {
       return c.json({})
     })
 
+    // Send event directly to user
+    app.post('/apps/:id/users/:user_id/events', async (c) => {
+      const userId = c.req.param('user_id')
+      // SAFETY: parsedBody is populated by REST auth middleware as JsonRecord.
+      const body = (c.get('parsedBody') ?? {}) as { name?: string; data?: unknown }
+      if (!isStringValue(body.name)) {
+        return c.json({ error: 'Event name is required' }, 400)
+      }
+
+      // SAFETY: body conforms to JsonRecord and data defaults to empty object.
+      await this.namespace.sendToUser(userId, body.name, (body.data ?? {}) as never)
+      return c.json({})
+    })
+
     return app
   }
 
@@ -540,9 +554,9 @@ export class SocketoServer {
 
         ws.on('message', (rawData: string | Buffer) => {
           this.startActivityTimer(socketId, ws)
-          const text = isStringValue(rawData)
-            ? rawData
-            : Buffer.from(rawData).toString()
+          const text = Buffer.isBuffer(rawData)
+            ? rawData.toString()
+            : rawData
           void this.namespace.receive(socketId, text).catch(() => undefined)
         })
 

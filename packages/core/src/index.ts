@@ -44,6 +44,7 @@ export {
   isPrivateChannel,
   isProtectedChannel,
   isRecord,
+  isServerToUserChannel,
   isStringValue,
   isUnsupportedChannel,
   isValidChannelName,

@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import {
   createErrorMessage,
   createHandshakeMessage,
+  type JsonValue,
   serializeMessage,
 } from '@socketo/core'
 import type { BatchEvent, Event } from '@/api/schemas/apps'
@@ -83,6 +84,14 @@ export class ServerDO extends DurableObject<Env> {
 
   public async terminateUserConnections(userId: string) {
     await this.ws.terminateUserConnections(userId)
+  }
+
+  public async sendToUser(
+    userId: string,
+    event: string,
+    data: JsonValue,
+  ): Promise<{ sent: number }> {
+    return this.ws.sendToUser(userId, event, data)
   }
 
   public getSocketCount() {
