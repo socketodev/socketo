@@ -512,8 +512,14 @@ export class SocketoServer {
       const url = new URL(request.url || '/', `http://${host}:${port}`)
       const match = url.pathname.match(/^\/app\/([^/]+)$/)
 
-      if (!match || (appKey !== '*' && match[1] !== appKey)) {
+      if (!match) {
         socket.destroy()
+        return
+      }
+      if (appKey !== '*' && match[1] !== appKey) {
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          this.rejectSocket(ws, 4001, 'Application does not exist')
+        })
         return
       }
 

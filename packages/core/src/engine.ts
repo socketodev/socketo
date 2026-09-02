@@ -261,12 +261,11 @@ export class RealtimeNamespace {
       const includeUserCount = requested.includes('user_count')
       const includeSubscriptionCount = requested.includes('subscription_count')
 
-      const result: Record<string, Record<string, number>> =
-        Object.create(null)
+      const result: Record<string, Record<string, number>> = {}
 
       for (const channel of channels) {
         const occ = this.getChannel(channel)
-        const attrs: Record<string, number> = Object.create(null)
+        const attrs: Record<string, number> = {}
         if (occ) {
           if (includeUserCount && channel.startsWith('presence-')) {
             attrs.user_count = occ.user_count
@@ -314,7 +313,7 @@ export class RealtimeNamespace {
       const includeSubscriptionCount = requested.includes('subscription_count')
 
       const occ = this.getChannel(item.channel)
-      const attrs: Record<string, number> = Object.create(null)
+      const attrs: Record<string, number> = {}
       if (occ) {
         if (includeUserCount && item.channel.startsWith('presence-')) {
           attrs.user_count = occ.user_count
@@ -425,7 +424,7 @@ export class RealtimeNamespace {
       requestedAttrs.includes('subscription_count')
     const filterByPrefix = options?.filterByPrefix
 
-    const result: Record<string, ChannelAttributes> = Object.create(null)
+    const result: Record<string, ChannelAttributes> = {}
 
     for (const [channel, sockets] of this.channels) {
       if (isServerToUserChannel(channel)) continue
@@ -483,7 +482,7 @@ export class RealtimeNamespace {
   }
 
   public async terminateUserConnections(userId: string) {
-    const socketIds = this.getUserSocketIds(userId)
+    const socketIds = this.getTerminationSocketIds(userId)
 
     await Promise.all(
       socketIds.map(async (socketId) => {
@@ -997,6 +996,16 @@ export class RealtimeNamespace {
     return this.presenceUsers.get(channel)?.size ?? 0
   }
 
+  private getTerminationSocketIds(userId: string) {
+    return [...this.sessions.values()]
+      .filter(
+        (session) =>
+          session.userId === userId ||
+          [...session.presenceUserId.values()].includes(userId),
+      )
+      .map((session) => session.id)
+  }
+
   private getUserSocketIds(userId: string) {
     return [...this.sessions.values()]
       .filter((session) => session.userId === userId)
@@ -1005,7 +1014,7 @@ export class RealtimeNamespace {
 
   private getPresenceData(channel: string): PresenceData {
     const users = this.presenceUsers.get(channel)
-    const hash: Record<string, UserInfo> = Object.create(null)
+    const hash: Record<string, UserInfo> = {}
     const ids = [...(users?.keys() ?? [])]
 
     for (const userId of ids) {
