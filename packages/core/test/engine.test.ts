@@ -191,6 +191,21 @@ describe('RealtimeNamespace', () => {
     expect(namespace.getSocketCount()).toBe(0)
   })
 
+  test('terminates user connections established through presence channel without signin', async () => {
+    const namespace = new RealtimeNamespace(policy)
+    const connection = new TestConnection('socket-presence')
+    namespace.connect(connection)
+
+    await subscribePresence(namespace, connection, 'user-presence', {
+      name: 'PresenceUser',
+    })
+    expect(namespace.getSocketCount()).toBe(1)
+
+    await namespace.terminateUserConnections('user-presence')
+    expect(connection.closed).toBe(true)
+    expect(namespace.getSocketCount()).toBe(0)
+  })
+
   test('rejects unsupported channel types and allows signed-in presence data', async () => {
     const namespace = new RealtimeNamespace(policy)
     const connection = new TestConnection('socket-1')
@@ -528,9 +543,7 @@ describe('RealtimeNamespace', () => {
       channel: '#server-to-user-user-target',
       data: '{"hello":"world"}',
     })
-    expect(
-      connPresenceOnly.takeLast('direct-trigger-test'),
-    ).toBeUndefined()
+    expect(connPresenceOnly.takeLast('direct-trigger-test')).toBeUndefined()
 
     // Test subscribing to #server-to-user channel
     await namespace.receive(
@@ -626,6 +639,12 @@ describe('RealtimeNamespace', () => {
 
     // Verify Object prototype was not corrupted
     expect('role' in Object.prototype).toBe(false)
+    // Verify results are structuredClone serializable (required for Cloudflare Durable Object RPC)
+    expect(() => structuredClone(query)).not.toThrow()
+    expect(() => structuredClone(triggerRes)).not.toThrow()
+    expect(structuredClone(triggerRes.channels)).toEqual({
+      __proto__: { subscription_count: 1 },
+    })
   })
 })
 
