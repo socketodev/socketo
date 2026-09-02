@@ -13,7 +13,7 @@
 - Run all workspace development tasks with `bun run dev`; run only the Worker with `bun run --filter=@socketo/server dev`.
 - Build everything with `bun run build`; build only the Worker with `bun run --filter=@socketo/server build`.
 - Build the shared core with `bun run --filter=@socketo/core build` and the CLI with `bun run --filter=@socketo/cli build`.
-- Run unit tests with `bun test` or `bun run --filter=@socketo/core test` (10 unit tests, 126 assertions).
+- Run unit tests with `bun test` (32 unit tests, 204 assertions across core and CLI) or focus on core with `bun run --filter=@socketo/core test` (18 unit tests, 162 assertions).
 - Start the local CLI with `bun run --filter=@socketo/cli start`; it is a standalone Node `ws` adapter over `@socketo/core`.
 - Deploy only through `bun run --filter=@socketo/server deploy`; this runs `vite build` before `wrangler deploy`.
 - Regenerate Cloudflare bindings after changing `apps/server/wrangler.jsonc` with `bun run --filter=@socketo/server cf-typegen`; `apps/server/worker-configuration.d.ts` is generated and should not be edited manually.

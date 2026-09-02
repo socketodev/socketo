@@ -1,4 +1,9 @@
-import { invalidInfoAttribute } from '@socketo/core'
+import {
+  invalidInfoAttribute,
+  isRecord,
+  isStringValue,
+  type JsonValue,
+} from '@socketo/core'
 import { Hono } from 'hono'
 import { validator } from 'hono/validator'
 import type { HonoContext } from '@/types'
@@ -101,6 +106,24 @@ app.post('/:key/users/:user_id/terminate_connections', async (c) => {
   const userId = c.req.param('user_id')
 
   await stub.terminateUserConnections(userId)
+  return c.json({}, 200)
+})
+
+app.post('/:key/users/:user_id/events', async (c) => {
+  const { stub } = c.get('app')
+  const userId = c.req.param('user_id')
+  // SAFETY: c.req.json() parses JSON into JsonValue or null on failure.
+  const rawBody = (await c.req.json().catch(() => null)) as
+    | JsonValue
+    | undefined
+  if (!isRecord(rawBody) || !isStringValue(rawBody.name)) {
+    return c.json({ error: 'Event name is required' }, 400)
+  }
+
+  const eventName = rawBody.name
+  // SAFETY: rawBody conforms to JsonRecord and data defaults to empty object.
+  const eventData = (rawBody.data ?? {}) as never
+  await stub.sendToUser(userId, eventName, eventData)
   return c.json({}, 200)
 })
 

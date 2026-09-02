@@ -264,8 +264,7 @@ export function startInteractiveRepl(
     }
   }
 
-  interface ReadlineInternal extends readline.Interface {
-    line?: string
+  type ReadlineInternal = readline.Interface & {
     closed?: boolean
     prevRows?: number
   }

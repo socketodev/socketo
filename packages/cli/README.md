@@ -212,6 +212,7 @@ socketo generate
 | `GET` | `/apps/:id/channels/:name` | Channel info |
 | `GET` | `/apps/:id/channels/:name/users` | Presence users |
 | `POST` | `/apps/:id/users/:user_id/terminate_connections` | Disconnect user |
+| `POST` | `/apps/:id/users/:user_id/events` | Send event directly to authenticated user |
 
 Query params: `?filter_by_prefix=` and `?info=user_count,subscription_count`.
 

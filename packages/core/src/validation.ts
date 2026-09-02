@@ -29,13 +29,26 @@ export function isUnsupportedChannel(channel: string): boolean {
   )
 }
 
+export function isServerToUserChannel(channel: string): boolean {
+  return channel.startsWith('#server-to-user-')
+}
+
 export function isValidChannelName(
   channel: string,
   maxLength = DEFAULT_CHANNEL_NAME_LENGTH,
 ): boolean {
   if (channel.length < 1 || channel.length > maxLength) return false
   if (channel.startsWith('pusher:')) return false
-  if (channel === 'private-' || channel === 'presence-') return false
+  if (
+    channel === 'private-' ||
+    channel === 'presence-' ||
+    channel === '#server-to-user-'
+  ) {
+    return false
+  }
+  if (isServerToUserChannel(channel)) {
+    return CHANNEL_NAME_REGEX.test(channel.slice('#server-to-user-'.length))
+  }
   return CHANNEL_NAME_REGEX.test(channel)
 }
 
