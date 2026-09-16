@@ -1,5 +1,5 @@
 import type { Migration, MigrationProvider } from 'kysely'
-import { type Kysely, Migrator } from 'kysely'
+import { type Kysely, Migrator, sql } from 'kysely'
 import type { Database } from './types'
 
 export const migrations = {
@@ -21,6 +21,31 @@ export const migrations = {
     },
     async down(db) {
       await db.schema.dropTable('apps').execute()
+    },
+  },
+  '002': {
+    async up(db) {
+      await db.schema
+        .createTable('webhook_endpoints')
+        .addColumn('id', 'text', (col) => col.primaryKey().unique())
+        .addColumn('app_id', 'text', (col) =>
+          col.references('apps.id').onDelete('cascade').notNull(),
+        )
+        .addColumn('url', 'text', (col) => col.notNull())
+        .addColumn('events', 'text', (col) => col.notNull())
+        .addColumn('is_enabled', 'integer', (col) => col.notNull().defaultTo(1))
+        .addColumn('created_at', 'text', (col) =>
+          col.notNull().defaultTo(sql`CURRENT_TIMESTAMP`),
+        )
+        .execute()
+      await db.schema
+        .createIndex('idx_webhook_endpoints_app_id')
+        .on('webhook_endpoints')
+        .column('app_id')
+        .execute()
+    },
+    async down(db) {
+      await db.schema.dropTable('webhook_endpoints').execute()
     },
   },
 } satisfies Record<string, Migration>

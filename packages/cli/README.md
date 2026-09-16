@@ -34,6 +34,8 @@ Options:
   -i, --app-id <id>            Pusher App ID (default: matches app-key)
   -k, --app-key <key>          Pusher App Key (default: local)
   -s, --app-secret <secret>    Pusher App Secret for auth validation
+  -w, --webhook <url>          Outbound webhook target URL
+  --webhook-events <events>    Comma-separated webhook event types
   -v, --verbose                Log detailed event payloads and socket activity
   --disable-client-events      Disable client-triggered events (client-*)
   --socket-id <id>             Exclude socket from broadcast (trigger)
@@ -44,13 +46,15 @@ Options:
 
 ### Environment Variables
 
-You can also configure default credentials via environment variables:
+You can also configure default credentials and webhooks via environment variables:
 
 | Variable | Description | Default |
 |---|---|---|
 | `SOCKETO_APP_ID` | Pusher App ID | Matches `SOCKETO_APP_KEY` |
 | `SOCKETO_APP_KEY` | Pusher App Key | `local` |
 | `SOCKETO_APP_SECRET` | Pusher App Secret | Matches `SOCKETO_APP_KEY` |
+| `SOCKETO_WEBHOOK_URL` | Webhook URL for outbound event delivery | _(none)_ |
+| `SOCKETO_WEBHOOK_EVENTS` | Comma-separated event types to dispatch | All events |
 
 ### Client SDK
 

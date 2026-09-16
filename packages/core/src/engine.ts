@@ -998,11 +998,13 @@ export class RealtimeNamespace {
 
   private getTerminationSocketIds(userId: string) {
     return [...this.sessions.values()]
-      .filter(
-        (session) =>
-          session.userId === userId ||
-          [...session.presenceUserId.values()].includes(userId),
-      )
+      .filter((session) => {
+        if (session.userId === userId) return true
+        for (const presenceUser of session.presenceUserId.values()) {
+          if (presenceUser === userId) return true
+        }
+        return false
+      })
       .map((session) => session.id)
   }
 
@@ -1017,6 +1019,9 @@ export class RealtimeNamespace {
     const hash: Record<string, UserInfo> = {}
     const ids = [...(users?.keys() ?? [])]
 
+    // Use Object.defineProperty so that custom IDs (like '__proto__') are assigned as own
+    // properties without prototype pollution, while preserving plain object serialization
+    // compatibility required by Cloudflare Durable Object RPC (structuredClone).
     for (const userId of ids) {
       Object.defineProperty(hash, userId, {
         value: users?.get(userId)?.userInfo ?? {},

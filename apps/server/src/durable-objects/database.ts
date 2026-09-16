@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import type { WebhookEndpointConfig } from '@socketo/core'
 import type { Kysely } from 'kysely'
 import { createDatabase } from '@/database/client'
 import { createMigrator } from '@/database/migrations'
@@ -33,6 +34,35 @@ export class DatabaseDO extends DurableObject<Env> {
         eb.or([eb('id', '=', identifier), eb('key', '=', identifier)]),
       )
       .executeTakeFirst()
+  }
+
+  public async getWebhooksByAppId(
+    appId: string,
+  ): Promise<WebhookEndpointConfig[]> {
+    const rows = await this.db
+      .selectFrom('webhook_endpoints')
+      .selectAll()
+      .where('app_id', '=', appId)
+      .where('is_enabled', '=', 1)
+      .execute()
+
+    return rows.map((r) => {
+      let events: string[] = []
+      try {
+        const parsed = JSON.parse(r.events)
+        if (Array.isArray(parsed)) {
+          events = parsed
+        }
+      } catch {
+        events = []
+      }
+      return {
+        id: r.id,
+        url: r.url,
+        events,
+        isEnabled: r.is_enabled === 1,
+      }
+    })
   }
 
   async migrate() {

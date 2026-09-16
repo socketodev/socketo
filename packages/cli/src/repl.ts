@@ -227,6 +227,7 @@ ${PRIMARY_BOLD}Server Status:${RESET}
   ${DIM}Sockets:${RESET}        ${server.getSocketCount()} active
   ${DIM}Channels:${RESET}       ${server.getChannelsCount()} active
   ${DIM}Users:${RESET}          ${server.getUsersCount()} unique
+  ${DIM}Webhook:${RESET}        ${server.webhookUrl || 'disabled'}
   ${DIM}Uptime:${RESET}         ${uptimeStr}
 `)
 }

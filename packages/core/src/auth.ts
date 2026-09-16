@@ -140,6 +140,25 @@ export function signRestRequest(options: {
   return { queryParams, signature }
 }
 
+export function createWebhookSignature(
+  rawBody: string,
+  appSecret: string,
+): string {
+  return hmacHex(appSecret, rawBody)
+}
+
+export function verifyWebhookSignature(
+  rawBody: string,
+  keyHeader: string,
+  signatureHeader: string,
+  expectedAppKey: string,
+  expectedAppSecret: string,
+): boolean {
+  if (keyHeader !== expectedAppKey) return false
+  const expectedSignature = createWebhookSignature(rawBody, expectedAppSecret)
+  return safeTimingEqual(signatureHeader, expectedSignature)
+}
+
 function hmacHex(secret: string, data: string): string {
   return createHmac('sha256', secret).update(data).digest('hex')
 }
