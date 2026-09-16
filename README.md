@@ -81,6 +81,56 @@ Fill in the row with your key/secret pair:
 
 > **Note:** `location_hint` controls the initial geographic placement of the `ServerDO` Durable Object instance. If omitted, Cloudflare automatically selects the optimal data center based on the origin of the initial `get()` request.
 
+### 6. Configure Webhooks (Optional)
+
+To receive real-time webhook notifications for channel lifecycle and client events:
+
+1. In Cloudflare Dashboard > **Durable Objects** > `DatabaseDO` > **Data Studio** (`default`).
+2. Select the `webhook_endpoints` table > **Add Row**.
+
+| Column | Value | Description |
+|---|---|---|
+| `id` | Unique ID | e.g. `wh_1` or a UUID |
+| `app_id` | App ID | Foreign key matching `apps.id` |
+| `url` | Webhook URL | Destination URL (e.g. `https://api.example.com/pusher/webhook`) |
+| `events` | JSON Array | Events to subscribe to: `["channel_occupied", "channel_vacated", "member_added", "member_removed", "client_event"]` |
+| `is_enabled` | `1` | `1` = active, `0` = disabled |
+
+> **Note:** Run `POST /migrate` again after deploying this version so the `webhook_endpoints` table is created. `ServerDO` loads webhook config once at startup — changes via Data Studio require a `ServerDO` restart/hibernate to take effect (same as app config caching).
+
+#### Webhook Request Format
+
+Dispatched as HTTP `POST` with standard Pusher headers:
+- `Content-Type: application/json`
+- `X-Pusher-Key: <app_key>`
+- `X-Pusher-Signature: <hmac_sha256_hex(body, app_secret)>`
+
+Payload format:
+```json
+{
+  "time_ms": 1710000000000,
+  "events": [
+    {
+      "name": "channel_occupied",
+      "channel": "chat-room"
+    }
+  ]
+}
+```
+
+Verify signatures using the official Pusher SDK:
+```javascript
+const webhook = pusher.webhook({ headers: req.headers, rawBody })
+if (webhook.isValid()) {
+  const events = webhook.getEvents()
+}
+```
+
+For local development with `@socketo/cli`:
+```bash
+npx @socketo/cli start -w http://localhost:3000/api/webhooks --webhook-events channel_occupied,channel_vacated
+```
+
 ## Stack
 
 - **Runtime:** Cloudflare Workers (Hibernatable WebSockets)
@@ -279,12 +329,10 @@ After deployment, configure `ADMIN_API_TOKEN` and run the production migration s
 
 ## Known Limitations
 
-- **In-memory config caching:** `ServerDO` loads and caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) in memory during constructor initialization via `blockConcurrencyWhile`. If you update an app's configuration via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
+- **In-memory config caching:** `ServerDO` loads and caches the app config (key/secret, `enable_client_events`, `max_connections`, etc.) and webhook endpoints in memory during constructor initialization via `blockConcurrencyWhile`. If you update an app's configuration or `webhook_endpoints` via Data Studio / Local Explorer while the `ServerDO` instance is still active (i.e., hasn't been evicted or hibernated), the running instance will continue using the **old cached values** until it restarts. To force a refresh, you must trigger a `ServerDO` restart (e.g., by deploying a new version or causing the Durable Object to hibernate and wake up).
 
 - **Unconstrained event size:** Server-side event payloads are not capped to 10 KB by default in the self-hosted edition, allowing larger custom payloads. Large WebSocket messages may still hit Cloudflare platform frame limits.
 
 - **Channel Scope:** Only standard **public**, **private** (`private-*`), and **presence** (`presence-*`) channels are supported. Pusher Cache Channels (`cache-*`, `private-cache-*`, `presence-cache-*`) and End-to-End Encrypted Channels (`private-encrypted-*`) are not supported; subscription attempts are rejected with error code `4300`.
-
-- **Outbound Webhooks:** Outbound event webhook dispatching is not supported in the self-hosted edition.
 
 - **User Watchlist:** Pusher user watchlist events (`pusher:watchlist`) for tracking online/offline status outside of presence channels are not supported.

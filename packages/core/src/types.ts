@@ -113,3 +113,41 @@ export type TriggerResult = {
 export type BatchTriggerResult = {
   batch: Array<Record<string, number>>
 }
+
+export type WebhookEvent =
+  | { name: 'channel_occupied'; channel: string }
+  | { name: 'channel_vacated'; channel: string }
+  | { name: 'member_added'; channel: string; user_id: string }
+  | { name: 'member_removed'; channel: string; user_id: string }
+  | {
+      name: 'client_event'
+      channel: string
+      event: string
+      data: string
+      socket_id?: string
+      user_id?: string
+    }
+
+export type WebhookEventType = WebhookEvent['name']
+
+export type WebhookPayload = {
+  time_ms: number
+  events: WebhookEvent[]
+}
+
+export type WebhookEndpointConfig = {
+  id?: string
+  url: string
+  events: string[]
+  isEnabled?: boolean
+}
+
+export type DispatchWebhookOptions = {
+  endpoints: WebhookEndpointConfig[]
+  appKey: string
+  appSecret: string
+  event: WebhookEvent
+  fetchFn?: typeof fetch
+  timeoutMs?: number
+  onError?: (error: Error, endpoint: WebhookEndpointConfig) => void
+}

@@ -3,6 +3,7 @@ import type { Insertable, Selectable, Updateable } from 'kysely'
 
 export interface Database {
   apps: AppsTable
+  webhook_endpoints: WebhookEndpointsTable
 }
 
 export interface AppsTable {
@@ -12,6 +13,15 @@ export interface AppsTable {
   max_connections: number
   enable_client_events: boolean
   location_hint: DurableObjectLocationHint | null
+}
+
+export interface WebhookEndpointsTable {
+  id: string
+  app_id: string
+  url: string
+  events: string
+  is_enabled: number
+  created_at?: string
 }
 
 export type App = Selectable<AppsTable>

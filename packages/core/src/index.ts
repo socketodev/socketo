@@ -1,9 +1,11 @@
 export {
+  createWebhookSignature,
   safeTimingEqual,
   signRestRequest,
   verifyChannelAuth,
   verifyRestAuth,
   verifySigninAuth,
+  verifyWebhookSignature,
 } from './auth'
 export { RealtimeNamespace } from './engine'
 export type {
@@ -25,6 +27,7 @@ export type {
   ChannelOccupancy,
   ChannelQueryResponse,
   ChannelsQueryResponse,
+  DispatchWebhookOptions,
   EventPayload,
   JsonObject,
   JsonPrimitive,
@@ -36,6 +39,10 @@ export type {
   SessionSnapshot,
   TriggerResult,
   UserInfo,
+  WebhookEndpointConfig,
+  WebhookEvent,
+  WebhookEventType,
+  WebhookPayload,
 } from './types'
 export {
   generateSocketId,
@@ -51,3 +58,4 @@ export {
   isValidEventName,
   isValidSocketId,
 } from './validation'
+export { dispatchWebhookEvent } from './webhooks'

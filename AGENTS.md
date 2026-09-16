@@ -13,7 +13,7 @@
 - Run all workspace development tasks with `bun run dev`; run only the Worker with `bun run --filter=@socketo/server dev`.
 - Build everything with `bun run build`; build only the Worker with `bun run --filter=@socketo/server build`.
 - Build the shared core with `bun run --filter=@socketo/core build` and the CLI with `bun run --filter=@socketo/cli build`.
-- Run unit tests with `bun test` (32 unit tests, 204 assertions across core and CLI) or focus on core with `bun run --filter=@socketo/core test` (18 unit tests, 162 assertions).
+- Run unit tests with `bun test` (44 unit tests, 250 assertions across core and CLI) or focus on core with `bun run --filter=@socketo/core test` (25 unit tests, 188 assertions).
 - Start the local CLI with `bun run --filter=@socketo/cli start`; it is a standalone Node `ws` adapter over `@socketo/core`.
 - Deploy only through `bun run --filter=@socketo/server deploy`; this runs `vite build` before `wrangler deploy`.
 - Regenerate Cloudflare bindings after changing `apps/server/wrangler.jsonc` with `bun run --filter=@socketo/server cf-typegen`; `apps/server/worker-configuration.d.ts` is generated and should not be edited manually.
@@ -31,6 +31,6 @@
 - Preserve the Durable Object class names and existing migration tags in `apps/server/wrangler.jsonc`; changing them can affect deployed object state.
 - Socket IDs generated across all WebSocket connections follow the official Pusher Channels standard `<int>.<int>` (`generateSocketId()` from `@socketo/core`).
 - REST authentication requires the Pusher auth query parameters (`auth_version=1.0`, `auth_timestamp` within ±600s) and, for POST/PUT/PATCH requests, a matching `body_md5`; see `apps/server/src/api/middlewares/auth-middleware.ts`.
-- `ServerDO` loads and caches app configuration in memory in its constructor via `blockConcurrencyWhile`. Changes made through Local Explorer may not affect an active `ServerDO` until it restarts, hibernates, or is redeployed.
+- `ServerDO` loads and caches app configuration in memory in its constructor via `blockConcurrencyWhile`. Changes made through Local Explorer may not affect an active `ServerDO` until it restarts, hibernates, or is redeployed. This includes `webhook_endpoints` — webhook additions/removals also require a restart to take effect.
 - Keep Worker/runtime-specific code out of reusable protocol logic. `@socketo/core` owns protocol state, socket ID generation, and validation; the Durable Object and CLI packages provide their respective WebSocket adapters.
 - Do not format or lint `apps/server/worker-configuration.d.ts` as ordinary source; regenerate it with Wrangler instead.

@@ -1,8 +1,12 @@
 import {
   type AppPolicy,
+  dispatchWebhookEvent,
+  isStringValue,
   type JsonValue,
   RealtimeNamespace,
   type SessionSnapshot,
+  type WebhookEndpointConfig,
+  type WebhookEvent,
 } from '@socketo/core'
 import type { BatchEvent, Event } from '../api/schemas/apps'
 import type { App } from '../database/types'
@@ -10,6 +14,8 @@ import type { ConnectionManager } from '../managers/connection-manager'
 import { isAttachmentData } from '../types'
 export class WebSocketHandler {
   private namespace: RealtimeNamespace | undefined
+  private webhooks: WebhookEndpointConfig[] = []
+  private config: App | undefined
 
   constructor(
     private ctx: DurableObjectState,
@@ -23,11 +29,42 @@ export class WebSocketHandler {
     )
   }
 
-  public configure(config: App): RealtimeNamespace {
+  public configure(
+    config: App,
+    webhooks: WebhookEndpointConfig[] = [],
+  ): RealtimeNamespace {
+    this.config = config
+    this.webhooks = webhooks
     const policy = this.toPolicy(config)
 
     if (!this.namespace) {
-      this.namespace = new RealtimeNamespace(policy)
+      this.namespace = new RealtimeNamespace(policy, {
+        onChannelOccupied: (channel) => {
+          this.emitWebhook({ name: 'channel_occupied', channel })
+        },
+        onChannelVacated: (channel) => {
+          this.emitWebhook({ name: 'channel_vacated', channel })
+        },
+        onMemberAdded: (channel, userId) => {
+          this.emitWebhook({ name: 'member_added', channel, user_id: userId })
+        },
+        onMemberRemoved: (channel, userId) => {
+          this.emitWebhook({ name: 'member_removed', channel, user_id: userId })
+        },
+        onClientEvent: (event) => {
+          const serialized = isStringValue(event.data)
+            ? event.data
+            : JSON.stringify(event.data)
+          this.emitWebhook({
+            name: 'client_event',
+            channel: event.channel,
+            event: event.event,
+            data: serialized,
+            socket_id: event.exceptId,
+            user_id: event.userId,
+          })
+        },
+      })
     } else {
       this.namespace.updatePolicy(policy)
     }
@@ -164,6 +201,25 @@ export class WebSocketHandler {
   public canAcceptNewConnection(maxConnections: number) {
     if (maxConnections === -1) return true
     return this.getSocketCount() + 1 <= maxConnections
+  }
+
+  private emitWebhook(event: WebhookEvent) {
+    if (!this.webhooks || this.webhooks.length === 0 || !this.config) return
+
+    const promise = dispatchWebhookEvent({
+      endpoints: this.webhooks,
+      appKey: this.config.key,
+      appSecret: this.config.secret,
+      event,
+      onError: (err, ep) => {
+        console.error(
+          `[Webhook Dispatch Error] Delivery to ${ep.url} failed:`,
+          err,
+        )
+      },
+    })
+
+    this.ctx.waitUntil(promise)
   }
 
   private toPolicy(config: App): AppPolicy {

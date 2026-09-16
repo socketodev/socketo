@@ -41,8 +41,10 @@ export class ServerDO extends DurableObject<Env> {
       throw new Error(`App not found for key: ${appKey}`)
     }
 
+    const webhooks = await db.getWebhooksByAppId(config.id)
+
     this.config = config
-    this.ws.configure(config)
+    this.ws.configure(config, webhooks)
   }
 
   private restore() {

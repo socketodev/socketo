@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  createWebhookSignature,
   generateSocketId,
+  isStringValue,
   isValidSocketId,
   safeTimingEqual,
   signRestRequest,
   verifyChannelAuth,
   verifyRestAuth,
   verifySigninAuth,
+  verifyWebhookSignature,
 } from '../src'
 
 const policy = {
@@ -109,5 +112,63 @@ describe('realtime auth', () => {
       expect(isValidSocketId(socketId)).toBe(true)
       expect(socketId).toMatch(/^\d+\.\d+$/)
     }
+  })
+
+  test('signs rawBody and verifies matching webhook signature', () => {
+    const rawBody = JSON.stringify({
+      time_ms: 1327070334784,
+      events: [{ name: 'channel_occupied', channel: 'chat-room' }],
+    })
+    const signature = createWebhookSignature(rawBody, policy.secret)
+    expect(isStringValue(signature)).toBe(true)
+    expect(signature.length).toBe(64)
+
+    expect(
+      verifyWebhookSignature(
+        rawBody,
+        policy.key,
+        signature,
+        policy.key,
+        policy.secret,
+      ),
+    ).toBe(true)
+  })
+
+  test('rejects webhook signature when key or body is modified', () => {
+    const rawBody = JSON.stringify({
+      time_ms: 1327070334784,
+      events: [{ name: 'channel_occupied', channel: 'chat-room' }],
+    })
+    const signature = createWebhookSignature(rawBody, policy.secret)
+
+    expect(
+      verifyWebhookSignature(
+        rawBody,
+        'wrong-key',
+        signature,
+        policy.key,
+        policy.secret,
+      ),
+    ).toBe(false)
+
+    expect(
+      verifyWebhookSignature(
+        rawBody,
+        policy.key,
+        'bad-signature',
+        policy.key,
+        policy.secret,
+      ),
+    ).toBe(false)
+
+    expect(
+      verifyWebhookSignature(
+        '{"tampered":true}',
+        policy.key,
+        signature,
+        policy.key,
+        policy.secret,
+      ),
+    ).toBe(false)
   })
 })

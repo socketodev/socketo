@@ -3,6 +3,7 @@ import { createServer as createHttpServer } from 'node:http'
 import { getRequestListener } from '@hono/node-server'
 import {
   type AppPolicy,
+  dispatchWebhookEvent,
   generateSocketId,
   invalidInfoAttribute,
   isStringValue,
@@ -12,6 +13,8 @@ import {
   RealtimeNamespace,
   serializeMessage,
   verifyRestAuth,
+  type WebhookEndpointConfig,
+  type WebhookEvent,
 } from '@socketo/core'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
@@ -32,6 +35,9 @@ export interface ServerOptions {
   enableClientEvents?: boolean
   verbose?: boolean
   logger?: Logger
+  webhookUrl?: string
+  webhookEvents?: string[]
+  webhooks?: WebhookEndpointConfig[]
 }
 
 type HonoEnv = {
@@ -110,6 +116,8 @@ export class SocketoServer {
   public readonly appKey: string
   public readonly appSecret: string
   public readonly startTime: number = Date.now()
+  public readonly webhookUrl?: string
+  public readonly webhooks: WebhookEndpointConfig[] = []
   public verbose: boolean
   public logger: Logger
   private readonly namespace: RealtimeNamespace
@@ -133,13 +141,52 @@ export class SocketoServer {
     this.appKey = options.appKey || 'local'
     this.appId = options.appId || this.appKey
     this.appSecret = options.appSecret || this.appKey
+    this.webhookUrl = options.webhookUrl
     this.verbose = options.verbose ?? false
     this.logger = options.logger ?? console.log
+
+    if (options.webhooks) {
+      this.webhooks = [...options.webhooks]
+    } else if (options.webhookUrl) {
+      this.webhooks = [
+        {
+          id: 'cli-default',
+          url: options.webhookUrl,
+          events: options.webhookEvents ?? [
+            'channel_occupied',
+            'channel_vacated',
+            'member_added',
+            'member_removed',
+            'client_event',
+          ],
+          isEnabled: true,
+        },
+      ]
+    }
 
     const policy: AppPolicy = {
       key: this.appKey,
       secret: this.appSecret || this.appKey,
       enableClientEvents: options.enableClientEvents ?? true,
+    }
+
+    const emitWebhook = (event: WebhookEvent) => {
+      if (this.webhooks.length === 0) return
+      dispatchWebhookEvent({
+        endpoints: this.webhooks,
+        appKey: this.appKey,
+        appSecret: this.appSecret,
+        event,
+        onError: (err) => {
+          if (this.verbose) {
+            this.log(`[${ts()}] webhook err  ${String(err)}`)
+          }
+        },
+      }).catch((err) => {
+        if (this.verbose) {
+          this.log(`[${ts()}] webhook err  ${String(err)}`)
+        }
+      })
     }
 
     const hooks: RealtimeHooks = {
@@ -152,18 +199,33 @@ export class SocketoServer {
         } else {
           this.log(`[${ts()}] client-event ${event.event} on ${event.channel}`)
         }
+        const serialized = isStringValue(event.data)
+          ? event.data
+          : JSON.stringify(event.data)
+        emitWebhook({
+          name: 'client_event',
+          channel: event.channel,
+          event: event.event,
+          data: serialized,
+          socket_id: event.exceptId,
+          user_id: event.userId,
+        })
       },
       onMemberAdded: (channel, userId) => {
         this.log(`[${ts()}] member+     ${userId} → ${channel}`)
+        emitWebhook({ name: 'member_added', channel, user_id: userId })
       },
       onMemberRemoved: (channel, userId) => {
         this.log(`[${ts()}] member-     ${userId} ← ${channel}`)
+        emitWebhook({ name: 'member_removed', channel, user_id: userId })
       },
       onChannelOccupied: (channel) => {
         this.log(`[${ts()}] occupied    ${channel}`)
+        emitWebhook({ name: 'channel_occupied', channel })
       },
       onChannelVacated: (channel) => {
         this.log(`[${ts()}] vacated     ${channel}`)
+        emitWebhook({ name: 'channel_vacated', channel })
       },
     }
 
@@ -483,13 +545,20 @@ export class SocketoServer {
     app.post('/apps/:id/users/:user_id/events', async (c) => {
       const userId = c.req.param('user_id')
       // SAFETY: parsedBody is populated by REST auth middleware as JsonRecord.
-      const body = (c.get('parsedBody') ?? {}) as { name?: string; data?: unknown }
+      const body = (c.get('parsedBody') ?? {}) as {
+        name?: string
+        data?: unknown
+      }
       if (!isStringValue(body.name)) {
         return c.json({ error: 'Event name is required' }, 400)
       }
 
       // SAFETY: body conforms to JsonRecord and data defaults to empty object.
-      await this.namespace.sendToUser(userId, body.name, (body.data ?? {}) as never)
+      await this.namespace.sendToUser(
+        userId,
+        body.name,
+        (body.data ?? {}) as never,
+      )
       return c.json({})
     })
 
@@ -560,9 +629,7 @@ export class SocketoServer {
 
         ws.on('message', (rawData: string | Buffer) => {
           this.startActivityTimer(socketId, ws)
-          const text = Buffer.isBuffer(rawData)
-            ? rawData.toString()
-            : rawData
+          const text = Buffer.isBuffer(rawData) ? rawData.toString() : rawData
           void this.namespace.receive(socketId, text).catch(() => undefined)
         })
 
@@ -669,6 +736,10 @@ export class SocketoServer {
     return this.namespace.getUsersCount()
   }
 
+  public getNamespace(): RealtimeNamespace {
+    return this.namespace
+  }
+
   public toggleVerbose(): boolean {
     this.verbose = !this.verbose
     return this.verbose
@@ -692,12 +763,16 @@ export class SocketoServer {
       ? `  ${DIM}➜${RESET}  ${PRIMARY}App id/key/secret:${RESET}  ${this.appKey}`
       : `  ${DIM}➜${RESET}  ${PRIMARY}App ID:${RESET}             ${this.appId}\n  ${DIM}➜${RESET}  ${PRIMARY}App Key:${RESET}            ${this.appKey}\n  ${DIM}➜${RESET}  ${PRIMARY}App Secret:${RESET}         ${this.appSecret}`
 
+    const webhookLine = this.webhookUrl
+      ? `\n  ${DIM}➜${RESET}  ${PRIMARY}Webhook:${RESET}            ${this.webhookUrl}`
+      : ''
+
     console.log(`
   ${PRIMARY_BOLD}⚡ Socketo Dev Server${RESET}
 
   ${DIM}➜${RESET}  ${PRIMARY}WebSocket:${RESET}          ${wsUrl}
   ${DIM}➜${RESET}  ${PRIMARY}REST API:${RESET}           ${restUrl}
-${credLine}
+${credLine}${webhookLine}
   ${DIM}➜${RESET}  ${PRIMARY}Verbose:${RESET}            ${this.verbose ? 'enabled' : 'disabled'} ${DIM}(/v to toggle)${RESET}
 
   ${DIM}Type${RESET} ${PRIMARY}/help${RESET} ${DIM}for interactive commands (e.g. /trigger)${RESET}

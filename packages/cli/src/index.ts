@@ -69,6 +69,8 @@ Options:
   -i, --app-id <id>                 Pusher App ID (default: matches app-key)
   -k, --app-key <key>               Pusher App Key (default: ${DEFAULT_APP_KEY})
   -s, --app-secret <secret>         Pusher App Secret for auth validation
+  -w, --webhook <url>               Outbound webhook target URL
+  --webhook-events <events>         Comma-separated webhook event types
   -v, --verbose                     Log detailed event payloads and socket activity
   --disable-client-events           Disable client-triggered events (client-*)
   --socket-id <id>                  Exclude socket from broadcast (trigger)
@@ -128,6 +130,8 @@ async function cmdStart(
   appSecret: string,
   enableClientEvents: boolean,
   verbose: boolean,
+  webhookUrl?: string,
+  webhookEvents?: string[],
 ) {
   const server = new SocketoServer({
     port,
@@ -137,6 +141,8 @@ async function cmdStart(
     appSecret: appSecret || undefined,
     enableClientEvents,
     verbose,
+    webhookUrl,
+    webhookEvents,
   })
 
   await server.listen()
@@ -563,6 +569,9 @@ const parsed = parseArgs({
     'app-id': { type: 'string', short: 'i' },
     'app-key': { type: 'string', short: 'k' },
     'app-secret': { type: 'string', short: 's' },
+    webhook: { type: 'string', short: 'w' },
+    'webhook-url': { type: 'string' },
+    'webhook-events': { type: 'string' },
     'socket-id': { type: 'string' },
     'user-id': { type: 'string' },
     presence: { type: 'boolean' },
@@ -588,6 +597,20 @@ const appId = isStringValue(parsed.values['app-id'])
 const appSecret = isStringValue(parsed.values['app-secret'])
   ? parsed.values['app-secret']
   : process.env.SOCKETO_APP_SECRET || appKey
+const webhookUrl = isStringValue(parsed.values.webhook)
+  ? parsed.values.webhook
+  : isStringValue(parsed.values['webhook-url'])
+    ? parsed.values['webhook-url']
+    : process.env.SOCKETO_WEBHOOK_URL || undefined
+const rawWebhookEvents = isStringValue(parsed.values['webhook-events'])
+  ? parsed.values['webhook-events']
+  : process.env.SOCKETO_WEBHOOK_EVENTS || undefined
+const webhookEvents = rawWebhookEvents
+  ? rawWebhookEvents
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  : undefined
 const socketId = isStringValue(parsed.values['socket-id'])
   ? parsed.values['socket-id']
   : undefined
@@ -630,6 +653,8 @@ switch (command) {
       appSecret,
       enableClientEvents,
       verbose,
+      webhookUrl,
+      webhookEvents,
     )
     break
   case 'subscribe':

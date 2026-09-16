@@ -608,9 +608,10 @@ describe('RealtimeNamespace', () => {
     expect(isStringValue(succeeded?.data)).toBe(true)
 
     // SAFETY: succeeded.data is a JSON-encoded string from subscription_succeeded.
-    const parsed = JSON.parse(succeeded!.data as string)
+    const parsed = JSON.parse(succeeded?.data as string)
     expect(parsed.presence.ids).toEqual(['__proto__'])
     expect(parsed.presence.count).toBe(1)
+    // biome-ignore lint/complexity/useLiteralKeys: testing explicit __proto__ key
     expect(parsed.presence.hash['__proto__']).toEqual({ role: 'special' })
 
     // Also test __proto__ public channel in queryChannels and trigger info
@@ -625,6 +626,7 @@ describe('RealtimeNamespace', () => {
     )
 
     const query = namespace.queryChannels({ info: 'subscription_count' })
+    // biome-ignore lint/complexity/useLiteralKeys: testing explicit __proto__ key
     expect(query.channels['__proto__']).toEqual({ subscription_count: 1 })
 
     const triggerRes = await namespace.trigger({
@@ -633,6 +635,7 @@ describe('RealtimeNamespace', () => {
       data: { ok: true },
       info: 'subscription_count',
     })
+    // biome-ignore lint/complexity/useLiteralKeys: testing explicit __proto__ key
     expect(triggerRes.channels?.['__proto__']).toEqual({
       subscription_count: 1,
     })
